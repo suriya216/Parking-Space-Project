@@ -27,6 +27,9 @@ export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps
   const [pass, setPass] = useState("");
   const [name, setName] = useState("");
   const [err, setErr] = useState("");
+  /* Set after a successful registration, cleared as soon as the user edits
+     the form or switches mode again. */
+  const [created, setCreated] = useState("");
   const [busy, setBusy] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
 
@@ -51,13 +54,24 @@ export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps
       return;
     }
     setErr("");
+    setCreated("");
     setBusy(true);
     try {
-      const session =
-        mode === "login"
-          ? await api.login(email, pass)
-          : await api.register({ name, email, password: pass, role });
-      onLogin(session);
+      if (mode === "login") {
+        onLogin(await api.login(email, pass));
+        return;
+      }
+      /* Registering does not sign the new account in. The server hands
+         back a session token, but using it would drop a user who has just
+         chosen a password straight onto the dashboard without ever
+         entering it. Return to the sign-in form instead, with the email
+         kept and the password cleared, so the credentials get exercised
+         against the database once. */
+      await api.register({ name, email, password: pass, role });
+      setMode("login");
+      setName("");
+      setPass("");
+      setCreated("Account created. Sign in to continue.");
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -151,6 +165,12 @@ export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps
           </div>
         )}
 
+        {created && (
+          <div data-testid={TID.authRegistered} className={s.created}>
+            {created}
+          </div>
+        )}
+
         {err && (
           <div data-testid={TID.authError} className={s.error}>
             {err}
@@ -212,6 +232,7 @@ export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps
                   e.preventDefault();
                   setMode("register");
                   setErr("");
+                  setCreated("");
                 }}
                 data-testid={TID.authSwitchToRegister}
                 className={s.switchLink}

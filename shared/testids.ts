@@ -23,6 +23,7 @@ export const TID = {
   authName: "auth-name",
   authSubmit: "auth-submit",
   authError: "auth-error",
+  authRegistered: "auth-registered",
   authNotice: "auth-notice",
   authNoticeDismiss: "auth-notice-dismiss",
   authForgot: "auth-forgot",

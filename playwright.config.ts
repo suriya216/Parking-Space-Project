@@ -167,7 +167,12 @@ export default defineConfig({
   ],
 
   /* Reset the DB before the API comes up so every run starts from the
-     known seed. reuseExistingServer keeps a local `npm run dev` usable. */
+     known seed. reuseExistingServer keeps a local `npm run dev` usable.
+
+     The suite gets its own database file (PARKSPACE_DB below) because
+     reset.js deletes every user except the three seeded ones. Pointed at
+     the dev database that wipes accounts registered by hand, so manual
+     signups vanish between runs. */
   webServer: [
     {
       command: "node server/reset.js && node --env-file-if-exists=.env server/index.js",
@@ -182,6 +187,10 @@ export default defineConfig({
         DEMO_MODE: "true",
         NODE_ENV: "development",
         PORT: String(API_PORT),
+        /* Throwaway database, isolated from server/parkspace.db. Both the
+           reset and the server in the command above read it, and db.js
+           creates the directory if it is missing. */
+        PARKSPACE_DB: "server/test-data/parkspace.db",
       },
     },
     {

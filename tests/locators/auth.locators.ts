@@ -20,6 +20,7 @@ export const authLocators = (page: Page) => ({
   name: page.getByTestId(TID.authName),
   submit: page.getByTestId(TID.authSubmit),
   error: page.getByTestId(TID.authError),
+  registered: page.getByTestId(TID.authRegistered),
 
   notice: page.getByTestId(TID.authNotice),
   noticeDismiss: page.getByTestId(TID.authNoticeDismiss),

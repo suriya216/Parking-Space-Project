@@ -78,6 +78,12 @@ export class AuthPage extends BasePage {
     await this.el.email.fill(account.email);
     await this.el.password.fill(account.password);
     await this.submit();
+    /* Registering returns to the sign-in form, which clears the password
+       field as it switches mode. Wait for that to land: a caller that
+       starts typing credentials first would have them wiped mid-fill.
+       Registrations the server rejects leave the form up, so this only
+       waits for whichever of the two outcomes arrives. */
+    await this.el.registered.or(this.el.error).first().waitFor({ state: "visible" });
   }
 
   /** Fill a registration form without submitting — for validation specs. */

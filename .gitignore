@@ -40,6 +40,10 @@ blob-report/
 # Throwaway data directory the production security suite spins up
 server/prod-test-data/
 
+# Throwaway database the Playwright suite resets and reseeds each run,
+# kept out of server/parkspace.db so manually registered accounts survive
+server/test-data/
+
 # Per-machine Claude Code settings. .claude/settings.json is the shared,
 # committed config; the .local.json override is personal and stays local.
 .claude/settings.local.json

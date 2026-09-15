@@ -153,6 +153,17 @@
   border-radius: var(--ps-radius-sm);
 }
 
+/* Confirmation that an account was created, shown on the sign-in form the
+   user is returned to. Green rather than red: nothing went wrong. */
+.created {
+  background: var(--ps-tint-green-bg);
+  color: var(--ps-text-success);
+  font-size: 13px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: var(--ps-radius-sm);
+}
+
 .busy {
   opacity: 0.6;
   cursor: wait;

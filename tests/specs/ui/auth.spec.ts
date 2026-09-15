@@ -100,16 +100,35 @@ test.describe("register", () => {
     await authPage.openSignIn();
   });
 
-  test("a new driver can create an account and is signed straight in", async ({
+  test("a new driver is returned to sign-in, not signed straight in", async ({
     authPage,
     page,
   }) => {
-    await authPage.register(newAccount("driver"));
+    const account = newAccount("driver");
+    await authPage.register(account);
+
+    await expect(authPage.el.registered).toBeVisible();
+    await expect(page.getByTestId(TID.driverHome)).toBeHidden();
+    // Back on the login form: no name field, email kept, password cleared.
+    await expect(authPage.el.name).toBeHidden();
+    await expect(authPage.el.email).toHaveValue(account.email);
+    await expect(authPage.el.password).toHaveValue("");
+  });
+
+  test("the credentials just chosen work on the sign-in form", async ({
+    authPage,
+    page,
+  }) => {
+    const account = newAccount("driver");
+    await authPage.register(account);
+    await authPage.signIn(account);
     await expect(page.getByTestId(TID.driverHome)).toBeVisible();
   });
 
-  test("a new owner lands on the owner dashboard", async ({ authPage, page }) => {
-    await authPage.register(newAccount("owner"));
+  test("a new owner signs in to the owner dashboard", async ({ authPage, page }) => {
+    const account = newAccount("owner");
+    await authPage.register(account);
+    await authPage.signIn(account);
     await expect(page.getByTestId(TID.ownerDashboard)).toBeVisible();
   });
 

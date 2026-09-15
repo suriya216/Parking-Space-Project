@@ -270,31 +270,60 @@ the component's **module**.
 
 ## Testing
 
-Playwright + TypeScript, strict mode, **293 tests**. Full detail,
-including how to add a spec, is in **[tests/README.md](tests/README.md)**.
+Playwright + TypeScript, strict mode, **385 tests** by default (753 with
+the full device matrix). Full detail, including how to add a spec, is in
+**[tests/README.md](tests/README.md)**.
 
-### The four projects
+### Projects
 
-| Project | Tests | Browser | Server | Covers |
-|---|---|---|---|---|
-`unit` | 13 | none | none | `backstack.ts` vs a fake async history; design-token drift |
-`api` | 96 | none | yes | REST, Google + Apple OAuth, production security |
-`mobile` | 92 | WebKit, iPhone 13 | yes | the whole UI at phone width |
-`desktop` | 92 | Chromium, 1440×900 | yes | the same specs at desktop width |
+Run by default:
 
-`mobile` and `desktop` run the *same* spec files. What the desktop
-project tests is the layout at width, not a different browser path.
+| Project | Tests | Engine | Viewport |
+|---|---|---|---|
+`unit` | 13 | none | — |
+`api` | 96 | none | — |
+`ios` | 92 | **WebKit** — Mobile Safari's engine | iPhone 13, 390×664 |
+`android` | 92 | **Chromium** — Chrome on Android's engine | Pixel 7, 412×839 |
+`desktop` | 92 | Chromium | 1440×900 |
+
+All three UI projects run the *same* specs. Both the engine and the
+viewport differ, and both matter: [src/styles/layout.css](src/styles/layout.css)
+switches on **height** as well as width, and an iPhone 13 at 664px sits
+*inside* `@media (max-height: 700px)` while a Pixel 7 at 839px sits
+outside it. So iOS and Android exercise different CSS branches rather
+than repeating each other.
+
+Opt-in, via `npm run test:devices`:
+
+| Project | Viewport | Why this one |
+|---|---|---|
+`ios-small` | iPhone 13 Mini, 375×629 | shortest viewport supported |
+`android-narrow` | Galaxy S9+, 320×658 | narrowest — 320px was a real bug |
+`ios-tablet` | iPad Mini, 768×1024 | crosses `min-width: 720px` |
+`android-tablet` | Galaxy Tab S9, 640×1024 | just under that breakpoint |
+
+Each was picked because it lands on a different side of a breakpoint, not
+just because it is another phone. They are off by default because they
+triple the UI run.
+
+**These are emulated profiles** — a real engine with a device's viewport,
+user agent, scale factor and touch. That is what matters for a web app,
+but it is not an instrumented device: true native coverage needs
+`playwright._android` against a device or emulator, or a device cloud.
 
 ### Running
 
 ```bash
-npm test              # build, then everything (~3 min)
+npm test               # build, then the default projects (~5 min)
 
-npm run test:unit     # 13  — instant, no servers
-npm run test:api      # 96  — no browser
-npm run test:e2e      # 184 — mobile + desktop
-npm run test:mobile   # 92
-npm run test:desktop  # 92
+npm run test:unit      # 13  — instant, no servers
+npm run test:api       # 96  — no browser
+npm run test:e2e       # 276 — ios + android + desktop
+npm run test:mobile    # 184 — ios + android
+npm run test:ios       # 92
+npm run test:android   # 92
+npm run test:desktop   # 92
+npm run test:devices   # 552 — the full phone/tablet matrix
 ```
 
 **No prior `npm run dev` is needed.** `playwright.config.ts` has a
@@ -308,7 +337,7 @@ Narrow a run the usual ways:
 ```bash
 npx playwright test tests/specs/ui/booking.spec.ts
 npx playwright test -g "cancel"                    # by title
-npx playwright test --project=mobile --repeat-each=3   # hunt a flake
+npx playwright test --project=android --repeat-each=3   # hunt a flake
 ```
 
 ### Test architecture
@@ -441,7 +470,7 @@ Run before pushing; CI should run the same four:
 npm run typecheck   # tsc over the app AND the suite, both strict
 npm run lint        # oxlint + the mojibake check
 npm run build       # must produce a bundle
-npm test            # 293 tests
+npm test            # 385 tests across iOS, Android and desktop
 ```
 
 `npm run lint` includes `npm run check:encoding`, which walks `src/`,
@@ -460,7 +489,8 @@ codepage-guessing tool silently corrupts the UI. If it reports a file,
    `TID.x`, add it to the relevant `tests/locators/*.ts`.
 3. Put the behaviour on a page object, not in the spec.
 4. Write the spec against the page object.
-5. `npm run test:mobile -g "<your title>"` until green.
+5. `npm run test:ios -g "<your title>"` until green, then
+   `npm run test:mobile` to cover Android too.
 6. `npm run typecheck && npm run lint && npm test`.
 
 ---

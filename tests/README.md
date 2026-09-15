@@ -13,16 +13,22 @@ there only, so they can't drift between two files.
 ## Running
 
 ```bash
-npm test              # everything: unit + api + mobile + desktop
-npm run test:unit     # pure logic, no browser, no server
-npm run test:api      # API/OAuth/production, no browser
-npm run test:e2e      # UI at both viewports
-npm run test:mobile   # UI, iPhone 13
-npm run test:desktop  # UI, 1440x900
-npm run test:headed   # watch it run
-npm run test:report   # open the last HTML report
-npm run typecheck     # tsc over both the app and the suite
+npm test               # everything: unit + api + ios + android + desktop
+npm run test:unit      # pure logic, no browser, no server
+npm run test:api       # API/OAuth/production, no browser
+npm run test:e2e       # UI on all three default profiles
+npm run test:mobile    # UI on iOS and Android
+npm run test:ios       # WebKit, iPhone 13
+npm run test:android   # Chromium, Pixel 7
+npm run test:desktop   # Chromium, 1440x900
+npm run test:devices   # the wider phone/tablet matrix (opt-in)
+npm run test:headed    # watch it run
+npm run test:report    # open the last HTML report
+npm run typecheck      # tsc over both the app and the suite
 ```
+
+The project matrix, and why each device was chosen, is in the
+[root README](../README.md#projects).
 
 No prior `npm run dev` is needed: `playwright.config.ts` has a
 `webServer` block that resets the database, starts the Express API on
@@ -120,6 +126,18 @@ deployment. Nothing in the UI calls it.
 - **Navigations use `domcontentloaded`,** not `networkidle` — with a Vite
   HMR websocket and a map fetching tiles the network may never go idle.
   `BasePage.waitForApp()` waits for React to have mounted instead.
+- **Tap the map, don't click it.** Leaflet installs a touch/pointer path
+  on any touch-capable context and ignores synthetic mouse clicks there.
+  WebKit tolerated `mouse.click`; Chromium's Android emulation did not,
+  so pin-picking silently did nothing on Android only.
+- **Never tap a fixed point on the map.** A price marker under the tap
+  opens its popup and swallows it. Use
+  `DriverHomePage.tapEmptyMapArea()`, which measures the markers and
+  picks a gap — the owner specs create listings in parallel, so how many
+  markers are on screen is not fixed.
+- **After changing anything in `server/`, restart it.**
+  `reuseExistingServer` is on outside CI, so a stale process keeps
+  serving the old code and the suite happily tests routes you deleted.
 
 ## Mapping from the suites this replaced
 
