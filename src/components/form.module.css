@@ -1,0 +1,65 @@
+/** Form primitives: labelled input, labelled select, and notices. */
+
+.label {
+  display: block;
+}
+
+.labelText {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ps-color-g700);
+  display: block;
+  margin-bottom: 6px;
+}
+
+/* Shared by input and select. The font size is tokenised because it is a
+   hard floor, not a preference: iOS Safari zooms the whole page when a
+   focused field's text is under 16px, and the user cannot undo it. */
+.control {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px solid var(--ps-color-g300);
+  border-radius: var(--ps-radius-md);
+  font-size: var(--ps-font-size-input);
+  font-family: var(--ps-font-body);
+  margin-bottom: 14px;
+  background: var(--ps-color-white);
+}
+
+.select {
+  cursor: pointer;
+}
+
+/* Pulled up under the control it annotates, whose own margin-bottom
+   would otherwise leave a gap. */
+.hint {
+  font-size: 11px;
+  color: var(--ps-text-secondary);
+  display: block;
+  margin-top: -8px;
+  margin-bottom: 14px;
+}
+
+/* ── Notices ──────────────────────────────────────────────── */
+.notice {
+  padding: 11px 13px;
+  border-radius: var(--ps-radius-sm);
+  font-size: 13px;
+  margin-bottom: 14px;
+  line-height: 1.45;
+}
+
+.error {
+  background: var(--ps-tint-red-bg);
+  color: var(--ps-color-red);
+}
+
+.success {
+  background: var(--ps-tint-green-bg);
+  color: var(--ps-text-success);
+}
+
+.info {
+  background: var(--ps-tint-blue-bg);
+  color: var(--ps-tint-info-fg);
+}

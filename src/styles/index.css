@@ -1,0 +1,22 @@
+/**
+ * The app's global stylesheet — the only CSS entry point, imported once
+ * from src/main.jsx.
+ *
+ * Order matters:
+ *   1. tokens   define the custom properties everything else references
+ *   2. base     reset and document defaults
+ *   3. layout   app-shell classes (viewport height, safe areas, columns)
+ *   4. touch    interaction defaults
+ *   5. leaflet  map markers and overrides of leaflet's own chrome
+ *
+ * Everything here is global by necessity — fallback declaration pairs,
+ * `env()`, media queries, and selectors that must beat `leaflet.css`.
+ * Component-scoped styling lives in a `*.module.css` next to its
+ * component instead.
+ */
+
+@import "./tokens.css";
+@import "./base.css";
+@import "./layout.css";
+@import "./touch.css";
+@import "./leaflet.css";

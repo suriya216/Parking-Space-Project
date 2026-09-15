@@ -1,0 +1,55 @@
+{
+  "name": "parkspace",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "node --env-file-if-exists=.env server/index.js",
+    "dev:web": "vite",
+    "build": "vite build",
+    "lint": "oxlint && npm run check:encoding",
+    "preview": "vite preview",
+    "test": "npm run build && playwright test",
+    "test:unit": "playwright test --project=unit",
+    "test:api": "playwright test --project=api",
+    "test:e2e": "playwright test --project=ios --project=android --project=desktop",
+    "test:mobile": "playwright test --project=ios --project=android",
+    "test:ios": "playwright test --project=ios",
+    "test:android": "playwright test --project=android",
+    "test:desktop": "playwright test --project=desktop",
+    "test:devices": "node scripts/test-devices.mjs",
+    "test:headed": "playwright test --project=ios --headed",
+    "test:debug": "playwright test --debug",
+    "test:report": "playwright show-report",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tests --noEmit",
+    "check:encoding": "node scripts/encoding-check.mjs",
+    "db:reset": "node server/reset.js",
+    "start": "node server/index.js",
+    "secret": "node -e \"console.log(require('crypto').randomBytes(48).toString('base64url'))\"",
+    "prod:local": "node scripts/prod-local.mjs"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "leaflet": "^1.9.4",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-leaflet": "^5.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/leaflet": "^1.9.22",
+    "@types/node": "^26.5.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.1.0",
+    "concurrently": "^10.0.5",
+    "oxlint": "^1.79.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  }
+}

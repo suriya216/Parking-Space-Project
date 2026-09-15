@@ -1,0 +1,56 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# SQLite database (recreated and reseeded on server start), plus the
+# throwaway databases the OAuth and Apple suites spin up
+server/*.db
+server/*.db-shm
+server/*.db-wal
+
+# Owner-uploaded spot photos
+server/uploads/
+
+# Real OAuth credentials — .env.example is the template that is committed
+.env
+.env.local
+
+# Screenshots left behind by the removed e2e/*.mjs suites. The scripts
+# are gone; this stays until the directory itself is cleared, so the
+# leftovers can't be committed by accident in the meantime.
+e2e/shots/
+
+# Playwright artifacts: traces, failure screenshots, videos and the HTML
+# report. All regenerated per run, none worth committing.
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Throwaway data directory the production security suite spins up
+server/prod-test-data/
+
+# Per-machine Claude Code settings. .claude/settings.json is the shared,
+# committed config; the .local.json override is personal and stays local.
+.claude/settings.local.json
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

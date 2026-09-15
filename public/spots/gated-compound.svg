@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 260" width="400" height="260" role="img" aria-label="Gated apartment compound courtyard with a security gate and bike parking">
+  <defs>
+    <linearGradient id="gcSky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5FA8D3"/><stop offset="1" stop-color="#E8F4F8"/>
+    </linearGradient>
+    <linearGradient id="gcYard" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#DEE2E6"/><stop offset="1" stop-color="#ADB5BD"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="400" height="260" fill="url(#gcSky)"/>
+
+  <!-- apartment block behind -->
+  <rect x="40" y="34" width="128" height="130" fill="#F7F6F3"/>
+  <rect x="40" y="34" width="128" height="10" fill="#DEE2E6"/>
+  <g fill="#1B4965" opacity=".72">
+    <rect x="56" y="54" width="24" height="22"/><rect x="92" y="54" width="24" height="22"/><rect x="128" y="54" width="24" height="22"/>
+    <rect x="56" y="90" width="24" height="22"/><rect x="92" y="90" width="24" height="22"/><rect x="128" y="90" width="24" height="22"/>
+    <rect x="56" y="126" width="24" height="22"/><rect x="92" y="126" width="24" height="22"/><rect x="128" y="126" width="24" height="22"/>
+  </g>
+  <rect x="232" y="66" width="112" height="98" fill="#F1F3F5"/>
+  <g fill="#1B4965" opacity=".6">
+    <rect x="248" y="82" width="22" height="20"/><rect x="284" y="82" width="22" height="20"/><rect x="316" y="82" width="18" height="20"/>
+    <rect x="248" y="116" width="22" height="20"/><rect x="284" y="116" width="22" height="20"/><rect x="316" y="116" width="18" height="20"/>
+  </g>
+
+  <!-- compound wall -->
+  <rect x="0" y="150" width="400" height="20" fill="#E9ECEF"/>
+  <rect x="0" y="150" width="400" height="5" fill="#62D2A2"/>
+
+  <!-- sliding security gate -->
+  <g>
+    <rect x="150" y="112" width="104" height="58" fill="#1B4965" opacity=".18"/>
+    <rect x="150" y="112" width="104" height="7" rx="3" fill="#0D1B2A"/>
+    <rect x="150" y="163" width="104" height="7" rx="3" fill="#0D1B2A"/>
+    <g stroke="#0D1B2A" stroke-width="5">
+      <path d="M160 116 v50"/><path d="M178 116 v50"/><path d="M196 116 v50"/>
+      <path d="M214 116 v50"/><path d="M232 116 v50"/><path d="M248 116 v50"/>
+    </g>
+    <!-- gate posts -->
+    <rect x="140" y="100" width="12" height="70" fill="#495057"/>
+    <rect x="252" y="100" width="12" height="70" fill="#495057"/>
+    <!-- guard lamp -->
+    <circle cx="146" cy="96" r="7" fill="#62D2A2"/>
+  </g>
+
+  <!-- yard -->
+  <rect x="0" y="170" width="400" height="90" fill="url(#gcYard)"/>
+  <g stroke="#F8F9FA" stroke-width="2" opacity=".45">
+    <path d="M0 196 h400"/><path d="M0 224 h400"/>
+    <path d="M84 170 v90"/><path d="M200 170 v90"/><path d="M316 170 v90"/>
+  </g>
+  <rect x="26" y="180" width="76" height="6" rx="3" fill="#62D2A2" opacity=".85"/>
+  <rect x="298" y="180" width="76" height="6" rx="3" fill="#62D2A2" opacity=".85"/>
+
+  <!-- scooter / bike -->
+  <g>
+    <ellipse cx="112" cy="236" rx="46" ry="8" fill="#000" opacity=".22"/>
+    <circle cx="86" cy="228" r="15" fill="#212529"/><circle cx="86" cy="228" r="5" fill="#ADB5BD"/>
+    <circle cx="140" cy="228" r="15" fill="#212529"/><circle cx="140" cy="228" r="5" fill="#ADB5BD"/>
+    <path d="M86 228 q10-26 30-24 h22 q6 12 2 24" fill="#E03131"/>
+    <rect x="102" y="196" width="30" height="9" rx="4" fill="#0D1B2A"/>
+    <path d="M132 200 l14-14" stroke="#495057" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="148" cy="184" r="5" fill="#FCC419"/>
+  </g>
+
+  <!-- small car right -->
+  <g>
+    <ellipse cx="300" cy="238" rx="66" ry="9" fill="#000" opacity=".22"/>
+    <path d="M252 226 q3-30 18-33 h62 q15 3 18 33 z" fill="#5FA8D3"/>
+    <path d="M270 197 q5-16 15-17 h32 q10 1 15 17 z" fill="#0D1B2A" opacity=".8"/>
+    <rect x="249" y="220" width="104" height="12" rx="6" fill="#1B4965"/>
+    <circle cx="272" cy="232" r="12" fill="#212529"/><circle cx="330" cy="232" r="12" fill="#212529"/>
+  </g>
+
+  <g>
+    <rect x="14" y="14" width="80" height="26" rx="13" fill="#0D1B2A" opacity=".8"/>
+    <text x="54" y="31" font-family="'DM Sans',system-ui,sans-serif" font-size="12" font-weight="700" fill="#62D2A2" text-anchor="middle">GATED</text>
+  </g>
+</svg>

@@ -1,0 +1,64 @@
+/**
+ * The map surface and the card inside a marker popup.
+ *
+ * Note what is NOT here: the marker styling itself, and Leaflet's own
+ * chrome, both live in src/styles/leaflet.css. They have to be global —
+ * markers are built as HTML strings by L.divIcon(), and the Playwright
+ * suite locates the map by those class names.
+ */
+
+.map {
+  width: 100%;
+  height: 100%;
+}
+
+/* In pin-picking mode the whole map is a target. */
+.picking {
+  cursor: crosshair;
+}
+
+/* ── Popup card ───────────────────────────────────────────── */
+.popup {
+  font-family: var(--ps-font-body);
+  min-width: 170px;
+}
+
+.photo {
+  width: 100%;
+  height: 74px;
+  object-fit: cover;
+  border-radius: var(--ps-radius-sm);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ps-color-navy);
+}
+
+.address {
+  font-size: 11px;
+  color: var(--ps-text-secondary);
+  margin-bottom: 4px;
+}
+
+.meta {
+  font-size: 11px;
+  color: var(--ps-color-g600);
+  margin-bottom: 6px;
+}
+
+.view {
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--ps-radius-sm);
+  cursor: pointer;
+  background: var(--ps-color-mint);
+  color: var(--ps-color-navy);
+  font-family: var(--ps-font-body);
+  font-weight: 700;
+  font-size: 12px;
+}

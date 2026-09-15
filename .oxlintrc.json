@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "oxc", "eslint"],
+  "env": { "browser": true, "es2024": true },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }],
+    "no-undef": "error",
+    "no-unused-vars": "error"
+  },
+  "overrides": [
+    {
+      "files": ["server/**/*.js", "scripts/**/*.mjs", "vite.config.js"],
+      "env": { "node": true, "browser": false }
+    },
+    {
+      // The TypeScript Playwright suite. Same dual-globals reasoning as
+      // above, plus rules-of-hooks is switched off: Playwright fixtures
+      // take a callback named `use`, which the React plugin mistakes for
+      // the `use` hook and then reports as being called outside a
+      // component. There is no React in this tree at all.
+      "files": ["tests/**/*.ts", "shared/**/*.ts", "playwright.config.ts"],
+      "env": { "node": true, "browser": true },
+      "rules": {
+        "react/rules-of-hooks": "off"
+      }
+    }
+  ]
+}

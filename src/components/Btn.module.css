@@ -1,0 +1,75 @@
+/** Button. Base + size + variant, composed by Btn.tsx. */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  cursor: pointer;
+  font-family: var(--ps-font-body);
+  font-weight: 600;
+  border-radius: var(--ps-radius-md);
+  transition: all var(--ps-transition-fast);
+  width: auto;
+}
+
+.full {
+  width: 100%;
+}
+
+/* In-flight: dimmed with a wait cursor. The click is suppressed in
+   Btn.tsx as well — styling alone would still let a double-tap fire a
+   second request. */
+.busy {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* ── Sizes ────────────────────────────────────────────────
+   Every size carries a min-height: these are thumb targets, and the
+   labels alone would leave some under 40px. */
+.sm {
+  padding: 10px 16px;
+  font-size: 13px;
+  min-height: var(--ps-tap-min);
+}
+
+.md {
+  padding: 12px 24px;
+  font-size: 15px;
+  min-height: var(--ps-tap-comfortable);
+}
+
+.lg {
+  padding: 16px 32px;
+  font-size: 16px;
+  min-height: var(--ps-tap-large);
+}
+
+/* ── Variants ─────────────────────────────────────────────── */
+.primary {
+  background: var(--ps-color-mint);
+  color: var(--ps-color-navy);
+}
+
+.secondary {
+  background: var(--ps-color-blue);
+  color: var(--ps-color-white);
+}
+
+.outline {
+  background: transparent;
+  color: var(--ps-color-blue);
+  border: 1.5px solid var(--ps-color-blue);
+}
+
+.ghost {
+  background: var(--ps-color-g100);
+  color: var(--ps-color-g700);
+}
+
+.danger {
+  background: var(--ps-color-red);
+  color: var(--ps-color-white);
+}

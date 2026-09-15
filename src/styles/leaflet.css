@@ -1,0 +1,120 @@
+/**
+ * Leaflet map: our marker styling plus overrides of leaflet's own chrome.
+ *
+ * DELIBERATELY GLOBAL, never a CSS Module. Two reasons:
+ *
+ *  1. The marker markup is built by `L.divIcon()` in src/map/markers.ts as
+ *     an HTML string, so React never renders it and a hashed module class
+ *     could not be applied to it.
+ *  2. `.leaflet-container`, `.ps-price-tag`, `.ps-user-dot` and
+ *     `.ps-pin-marker` are the hooks the Playwright suite locates the map
+ *     by (tests/locators/driver.locators.ts). CSS Modules would hash these
+ *     names and every map assertion would stop matching.
+ *
+ * Renaming anything here means updating src/map/markers.ts and
+ * tests/locators/driver.locators.ts together.
+ */
+
+/* ── Our markers ───────────────────────────────────────── */
+/* Leaflet's divIcon ships a white box by default; clear it so only our
+   own tag shows. */
+.ps-price-marker,
+.ps-user-marker {
+  background: transparent;
+  border: none;
+}
+
+.ps-price-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 10px;
+  border-radius: var(--ps-radius-lg) var(--ps-radius-lg) var(--ps-radius-lg) 2px;
+  background: var(--ps-color-mint);
+  color: var(--ps-color-navy);
+  font-family: var(--ps-font-display);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: var(--ps-shadow-marker);
+  transition:
+    transform var(--ps-transition-fast),
+    background var(--ps-transition-fast);
+}
+
+.ps-price-tag.is-selected {
+  background: var(--ps-color-navy);
+  color: var(--ps-color-white);
+  transform: scale(1.15);
+}
+
+/* Pinned search position: visually distinct from the blue device dot. */
+.ps-pin-marker {
+  font-size: 22px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 35%));
+}
+
+.ps-user-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--ps-radius-circle);
+  background: var(--ps-color-teal);
+  border: 3px solid var(--ps-color-white);
+  box-shadow: 0 0 0 6px rgb(95 168 211 / 25%);
+}
+
+/* ── Leaflet's own chrome ──────────────────────────────── */
+/* Popup chrome restyled to match the app's cards. */
+.leaflet-popup-content-wrapper {
+  border-radius: var(--ps-radius-lg);
+  padding: 4px;
+}
+
+.leaflet-popup-content {
+  margin: 8px;
+}
+
+.leaflet-container {
+  font-family: var(--ps-font-body);
+}
+
+/* The spot list sheet overlaps the map's bottom edge by 24px, so lift the
+   zoom control clear of it. */
+.leaflet-control-zoom {
+  margin-bottom: 34px !important;
+}
+
+/* On a touch device pinch-zoom is the natural gesture and the +/- buttons
+   are redundant — and actively harmful here: the map strip is only ~180px
+   tall on a short phone, where the zoom bar landed on top of the filter
+   button and swallowed its taps. Mouse users keep the buttons. */
+@media (hover: none) and (pointer: coarse) {
+  .leaflet-control-zoom {
+    display: none;
+  }
+}
+
+/* Leaflet ships 26px (30px on touch) zoom buttons, too small for a thumb.
+   leaflet.css is imported from the app and so loads AFTER this file, which
+   means matching its specificity isn't enough — it would win on order.
+   The extra `.leaflet-container` raises specificity above its
+   `.leaflet-touch .leaflet-bar a`. */
+.leaflet-container .leaflet-bar a,
+.leaflet-container.leaflet-touch .leaflet-bar a {
+  width: var(--ps-tap-min);
+  height: var(--ps-tap-min);
+  line-height: 38px;
+  font-size: 20px;
+}
+
+/* Give the attribution a slightly larger hit area without shouting. */
+.leaflet-control-attribution {
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.leaflet-control-attribution a {
+  padding: 4px 2px;
+  display: inline-block;
+}

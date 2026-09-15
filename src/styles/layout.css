@@ -1,0 +1,109 @@
+/**
+ * App-shell layout: viewport height, safe areas, the map/list split and
+ * the wide-screen column.
+ *
+ * These are GLOBAL class names, not CSS Modules, on purpose. Every rule
+ * here either needs two declarations for a fallback, an `env()`, or a
+ * media query — none of which a React inline style object can express,
+ * which is why they were never inline in the first place.
+ */
+
+/* ── Mobile viewport height ────────────────────────────── */
+/* On phones `100vh` is measured with the URL bar hidden, so a full-height
+   layout is taller than what you can actually see and fixed bottom bars
+   land below the fold. `dvh` tracks the live visible height. The plain
+   `vh` line stays first as a fallback for older browsers — this needs two
+   declarations, which an inline React style object cannot express. */
+.ps-screen-h {
+  height: 100vh;
+  height: 100dvh;
+}
+
+.ps-screen-min-h {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* ── Safe areas (notch / home indicator) ───────────────── */
+/* Requires viewport-fit=cover on the viewport meta tag. Falls back to 0
+   where the env() is unsupported. */
+.ps-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Bars that already have their own bottom padding add the inset on top. */
+.ps-tabbar {
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  justify-content: space-around;
+}
+
+.ps-actionbar {
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+
+/* ── Map / list split ──────────────────────────────────── */
+/* The map takes 45% of the height by default. On short viewports (small
+   phones, and landscape) that leaves no room for even one spot card, so
+   give the list more of the screen. */
+.ps-map-pane {
+  flex: 0 0 45%;
+}
+
+@media (max-height: 700px) {
+  /* Capped in px as well as %: on a 667px screen a percentage alone still
+     pushed the first listing under the tab bar. */
+  .ps-map-pane {
+    flex-basis: 28%;
+    max-height: 180px;
+  }
+
+  /* Tighten the sheet so a listing clears the tab bar on a 667px screen. */
+  .ps-spot-sheet {
+    padding-top: 12px !important;
+  }
+
+  .ps-sheet-handle {
+    margin-bottom: 8px !important;
+  }
+}
+
+/* Landscape: height is the scarce dimension, so shrink the map further. */
+@media (max-height: 480px) {
+  .ps-map-pane {
+    flex-basis: 38%;
+  }
+}
+
+/* ── Tablet / wide screens ─────────────────────────────── */
+/* The layout is phone-first, so on a tablet the list cards would stretch
+   to a full 1024px and read poorly. Centre the content in a comfortable
+   column instead; the map still uses the full width. */
+@media (min-width: 720px) {
+  .ps-spot-sheet > * {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .ps-content-column {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* Search + filter row: cap it and centre it over the map rather than
+     letting one input span the whole window. */
+  .ps-map-chrome {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* The bar itself stays full-width as a surface, but `space-around`
+     across 1920px throws the five items into the far corners. Group them
+     in the middle instead. */
+  .ps-tabbar {
+    justify-content: center;
+    gap: clamp(32px, 7vw, 96px);
+  }
+}

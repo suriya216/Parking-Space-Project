@@ -1,0 +1,21 @@
+/** Map chrome rendered inside the Leaflet container. */
+
+.recenter {
+  position: absolute;
+  right: 10px;
+  /* Clears the spot sheet, which overlaps the map's last 24px, while
+     staying well below the search row at the top — the map strip is only
+     ~180px tall on a short phone. */
+  bottom: 34px;
+  z-index: var(--ps-z-map-chrome);
+  width: var(--ps-tap-comfortable);
+  height: var(--ps-tap-comfortable);
+  border-radius: var(--ps-radius-lg);
+  background: var(--ps-color-white);
+  border: 1px solid var(--ps-color-g300);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--ps-shadow-control);
+}

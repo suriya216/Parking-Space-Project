@@ -1,0 +1,127 @@
+/**
+ * Design tokens.
+ *
+ * The CSS-side source of truth for every shared value. Anything in a
+ * stylesheet or a CSS Module should reference these rather than repeating
+ * a literal — before this file existed, #62d2a2, #0d1b2a and #5fa8d3 were
+ * written out in index.css *and* defined again in src/theme/colors.ts,
+ * so a palette change had to be made twice and silently drifted.
+ *
+ * `src/theme/*.ts` mirrors these for the TypeScript side, which is still
+ * needed where a real value (not a `var()`) has to be handed to
+ * JavaScript — Leaflet's `pathOptions`, for instance, writes SVG
+ * attributes directly. The two are kept honest by
+ * tests/specs/unit/tokens.spec.ts, which fails if they disagree.
+ *
+ * Naming: --ps-<group>-<name>. Grouped so a token's purpose is obvious
+ * at the call site.
+ */
+
+:root {
+  /* ── Brand and surface ────────────────────────────────
+     Tuned for fills, borders and icons. Several are too light for text
+     on white — use the text tokens below for that. */
+  --ps-color-navy: #0d1b2a;
+  --ps-color-blue: #1b4965;
+  --ps-color-teal: #5fa8d3;
+  --ps-color-mint: #62d2a2;
+  --ps-color-lime: #9bf19e;
+  --ps-color-cream: #f7f6f3;
+  --ps-color-white: #ffffff;
+
+  /* ── Greys ────────────────────────────────────────────── */
+  --ps-color-g50: #f8f9fa;
+  --ps-color-g100: #f1f3f5;
+  --ps-color-g200: #e9ecef;
+  --ps-color-g300: #dee2e6;
+  --ps-color-g400: #adb5bd;
+  --ps-color-g500: #868e96;
+  --ps-color-g600: #495057;
+  --ps-color-g700: #343a40;
+  --ps-color-g800: #212529;
+
+  /* ── Status ───────────────────────────────────────────── */
+  --ps-color-red: #e03131;
+  --ps-color-orange: #f08c00;
+  --ps-color-yellow: #fcc419;
+  --ps-color-success: #2f9e44;
+
+  /* ── Text ─────────────────────────────────────────────
+     Darkened equivalents for text on a light background. An audit found
+     ~100 places using the palette above for small text at 1.9–3.3:1,
+     well under the 4.5:1 WCAG AA needs — 11px grey captions were the
+     worst of it. Ratios are against white; do not lighten these. */
+  --ps-text-secondary: #5a6472; /* 6.0:1 — was g500 */
+  --ps-text-tertiary: #6b7280; /* 4.9:1 — was g400 */
+  --ps-text-link: #1b6c99; /* 5.8:1 — was teal */
+  --ps-text-warning: #b45309; /* 5.1:1 — was orange (star ratings) */
+  --ps-text-error: #c62828; /* 5.6:1 — was red (error messages) */
+  --ps-text-success: #1e7b34; /* 5.3:1 — was success (payout amounts) */
+  --ps-text-brand: #15805a; /* 4.9:1 — was mint, light backgrounds only */
+
+  /* ── Tinted notice/badge surfaces ─────────────────────
+     Foreground/background pairs, each already contrast-checked. The
+     original orange pairing was 3.5:1, under what 11px labels need. */
+  --ps-tint-green-bg: #e8f5e9;
+  --ps-tint-green-fg: #1b5e20;
+  --ps-tint-blue-bg: #e3f2fd;
+  --ps-tint-blue-fg: #0d47a1;
+  --ps-tint-orange-bg: #fff3e0;
+  --ps-tint-orange-fg: #9a3412;
+  --ps-tint-red-bg: #ffebee;
+  --ps-tint-red-fg: #b71c1c;
+  --ps-tint-purple-bg: #f3e8fd;
+  --ps-tint-purple-fg: #6a1b7a;
+  --ps-tint-info-fg: #1565c0;
+
+  /* ── Typography ───────────────────────────────────────── */
+  --ps-font-display: "Space Grotesk", system-ui, sans-serif;
+  --ps-font-body: "DM Sans", system-ui, sans-serif;
+
+  /* 16px is a hard floor on inputs: iOS Safari zooms the whole page when
+     a focused field's text is smaller, throwing the layout off in a way
+     the user cannot undo. */
+  --ps-font-size-input: 16px;
+
+  /* ── Radii ────────────────────────────────────────────── */
+  --ps-radius-sm: 8px;
+  --ps-radius-md: 10px;
+  --ps-radius-lg: 12px;
+  --ps-radius-xl: 14px;
+  --ps-radius-sheet: 20px;
+  --ps-radius-pill: 99px;
+  --ps-radius-circle: 50%;
+
+  /* ── Minimum hit targets ──────────────────────────────
+     Thumb-friendly floors. Leaflet's own 26px zoom buttons and the app's
+     former 24px pills were both under what a thumb reliably hits. */
+  --ps-tap-min: 40px;
+  --ps-tap-comfortable: 44px;
+  --ps-tap-large: 48px;
+
+  /* ── Shadows ──────────────────────────────────────────── */
+  --ps-shadow-card: 0 4px 20px rgb(0 0 0 / 8%);
+  --ps-shadow-control: 0 2px 8px rgb(13 27 42 / 18%);
+  --ps-shadow-marker: 0 2px 8px rgb(0 0 0 / 25%);
+  --ps-shadow-dropdown: 0 8px 28px rgb(13 27 42 / 18%);
+  --ps-shadow-tabbar: 0 -2px 12px rgb(13 27 42 / 6%);
+  --ps-shadow-back-pill: 0 2px 10px rgb(13 27 42 / 28%);
+
+  /* ── Overlay ──────────────────────────────────────────── */
+  --ps-overlay-backdrop: rgb(13 27 42 / 50%);
+  --ps-overlay-scrim: rgb(13 27 42 / 55%);
+
+  /* ── Z-index scale ───────────────────────────────────────
+     One place for every layer, so a local bump cannot bury app chrome.
+     Leaflet uses 200–800 internally for its panes and controls; the map
+     wrapper is `isolation: isolate` so those stay contained and never
+     compete with this scale. */
+  --ps-z-sheet: 10;
+  --ps-z-tabbar: 100;
+  --ps-z-screenbar: 200;
+  --ps-z-map-chrome: 900;
+  --ps-z-modal: 4000;
+
+  /* ── Motion ───────────────────────────────────────────── */
+  --ps-transition-fast: 0.15s;
+}

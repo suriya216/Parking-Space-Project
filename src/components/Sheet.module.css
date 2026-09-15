@@ -1,0 +1,84 @@
+/**
+ * Bottom-sheet modal.
+ *
+ * Every form in the app opens in one of these, so the interaction — and
+ * the layering — is defined once here.
+ */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--ps-overlay-backdrop);
+  z-index: var(--ps-z-modal);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.panel {
+  background: var(--ps-color-white);
+  width: 100%;
+  /* Capped so the sheet reads as a card on a tablet rather than
+     stretching across the window. */
+  max-width: 520px;
+  /* Leaves the backdrop visible above it, which is what signals the
+     sheet is dismissible. */
+  max-height: 88vh;
+  border-radius: var(--ps-radius-sheet) var(--ps-radius-sheet) 0 0;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--ps-font-body);
+}
+
+.header {
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--ps-color-g100);
+  flex-shrink: 0;
+}
+
+.headerRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  font-family: var(--ps-font-display);
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--ps-color-navy);
+}
+
+.subtitle {
+  font-size: 12px;
+  color: var(--ps-text-secondary);
+  margin-top: 2px;
+}
+
+.close {
+  background: var(--ps-color-g100);
+  border: none;
+  border-radius: var(--ps-radius-md);
+  cursor: pointer;
+  flex-shrink: 0;
+  width: var(--ps-tap-min);
+  height: var(--ps-tap-min);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.body {
+  padding: 20px;
+  overflow: auto;
+  flex: 1;
+}
+
+/* The bottom inset is added by .ps-actionbar in styles/layout.css, which
+   needs env() and so cannot live in a module. */
+.footer {
+  padding: 12px 20px 0;
+  border-top: 1px solid var(--ps-color-g100);
+  flex-shrink: 0;
+}

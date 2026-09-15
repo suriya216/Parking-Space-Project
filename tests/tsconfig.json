@@ -1,0 +1,35 @@
+{
+  /* Lives here, not at the repo root, because Playwright resolves the
+     tsconfig nearest each test file to apply `paths`. A solution-style
+     root tsconfig (files: [] + references) carries no paths, so the
+     @pages/@locators aliases would fail to resolve at run time. */
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+
+    /* No baseUrl: TypeScript removed that option, so `paths` entries are
+       relative to this file's directory (tests/). */
+    "paths": {
+      "@shared/*": ["../shared/*"],
+      "@pages/*": ["./pages/*"],
+      "@locators/*": ["./locators/*"],
+      "@fixtures/*": ["./fixtures/*"],
+      "@support/*": ["./support/*"]
+    }
+  },
+  "include": ["../tests/**/*.ts", "../shared/**/*.ts", "../playwright.config.ts"]
+}

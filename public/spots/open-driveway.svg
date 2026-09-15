@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 260" width="400" height="260" role="img" aria-label="Open residential driveway beside a house with a parked car">
+  <defs>
+    <linearGradient id="odSky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7FC4E8"/><stop offset="1" stop-color="#D4E6F1"/>
+    </linearGradient>
+    <linearGradient id="odDrive" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ADB5BD"/><stop offset="1" stop-color="#868E96"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="400" height="260" fill="url(#odSky)"/>
+  <circle cx="336" cy="42" r="24" fill="#FCC419" opacity=".85"/>
+
+  <!-- house -->
+  <rect x="28" y="86" width="150" height="92" fill="#F7F6F3"/>
+  <path d="M18 88 L103 40 L188 88 Z" fill="#E03131" opacity=".78"/>
+  <rect x="52" y="112" width="34" height="34" fill="#5FA8D3"/>
+  <path d="M52 129 h34 M69 112 v34" stroke="#F7F6F3" stroke-width="3"/>
+  <rect x="120" y="112" width="34" height="34" fill="#5FA8D3"/>
+  <path d="M120 129 h34 M137 112 v34" stroke="#F7F6F3" stroke-width="3"/>
+  <rect x="92" y="150" width="24" height="28" rx="2" fill="#495057"/>
+
+  <!-- hedge + tree -->
+  <circle cx="316" cy="128" r="34" fill="#2F9E44" opacity=".8"/>
+  <circle cx="344" cy="146" r="24" fill="#62D2A2" opacity=".75"/>
+  <rect x="312" y="150" width="9" height="34" fill="#6B4B2A"/>
+  <rect x="196" y="164" width="204" height="14" rx="7" fill="#2F9E44" opacity=".55"/>
+
+  <!-- driveway -->
+  <path d="M0 178 h400 v82 H0 Z" fill="url(#odDrive)"/>
+  <rect x="0" y="178" width="400" height="5" fill="#DEE2E6" opacity=".7"/>
+  <!-- paver seams -->
+  <g stroke="#F8F9FA" stroke-width="2" opacity=".35">
+    <path d="M0 204 h400"/><path d="M0 230 h400"/>
+    <path d="M60 178 v82"/><path d="M170 178 v82"/><path d="M280 178 v82"/><path d="M370 178 v82"/>
+  </g>
+
+  <!-- car -->
+  <g>
+    <ellipse cx="204" cy="238" rx="92" ry="11" fill="#000" opacity=".26"/>
+    <path d="M134 220 q4-38 22-42 h96 q18 4 22 42 z" fill="#62D2A2"/>
+    <path d="M156 182 q6-20 19-22 h54 q13 2 19 22 z" fill="#0D1B2A" opacity=".8"/>
+    <path d="M162 180 q5-17 16-18 h50 q11 1 16 18 z" fill="#E8F6FF" opacity=".92"/>
+    <rect x="130" y="212" width="148" height="15" rx="7" fill="#2F9E44"/>
+    <circle cx="160" cy="227" r="16" fill="#212529"/><circle cx="160" cy="227" r="6" fill="#DEE2E6"/>
+    <circle cx="250" cy="227" r="16" fill="#212529"/><circle cx="250" cy="227" r="6" fill="#DEE2E6"/>
+    <rect x="128" y="206" width="13" height="8" rx="4" fill="#FFF3BF"/>
+    <rect x="268" y="206" width="13" height="8" rx="4" fill="#E03131"/>
+  </g>
+
+  <g>
+    <rect x="14" y="14" width="72" height="26" rx="13" fill="#0D1B2A" opacity=".8"/>
+    <text x="50" y="31" font-family="'DM Sans',system-ui,sans-serif" font-size="12" font-weight="700" fill="#9BF19E" text-anchor="middle">OPEN</text>
+  </g>
+</svg>

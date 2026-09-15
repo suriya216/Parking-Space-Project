@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 260" width="400" height="260" role="img" aria-label="Underground basement parking level with numbered bays">
+  <defs>
+    <linearGradient id="blFloor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#343A40"/><stop offset="1" stop-color="#0D1B2A"/>
+    </linearGradient>
+    <radialGradient id="blGlow" cx=".5" cy="0" r="1">
+      <stop offset="0" stop-color="#FCC419" stop-opacity=".3"/>
+      <stop offset="1" stop-color="#FCC419" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="400" height="260" fill="#212529"/>
+  <!-- ceiling with ducts -->
+  <rect x="0" y="0" width="400" height="34" fill="#343A40"/>
+  <rect x="0" y="30" width="400" height="6" fill="#0D1B2A"/>
+  <rect x="24" y="8" width="150" height="11" rx="5" fill="#495057"/>
+  <rect x="226" y="8" width="150" height="11" rx="5" fill="#495057"/>
+  <!-- strip lights -->
+  <rect x="88" y="36" width="66" height="6" rx="3" fill="#FFF3BF"/>
+  <rect x="246" y="36" width="66" height="6" rx="3" fill="#FFF3BF"/>
+  <rect x="60" y="42" width="122" height="120" fill="url(#blGlow)"/>
+  <rect x="218" y="42" width="122" height="120" fill="url(#blGlow)"/>
+
+  <!-- back wall -->
+  <rect x="0" y="42" width="400" height="112" fill="#2B3238"/>
+  <!-- pillars -->
+  <rect x="8" y="42" width="26" height="112" fill="#495057"/>
+  <rect x="8" y="42" width="7" height="112" fill="#868E96"/>
+  <rect x="186" y="42" width="26" height="112" fill="#495057"/>
+  <rect x="186" y="42" width="7" height="112" fill="#868E96"/>
+  <rect x="366" y="42" width="26" height="112" fill="#495057"/>
+  <rect x="366" y="42" width="7" height="112" fill="#868E96"/>
+  <!-- hazard stripes on pillars -->
+  <rect x="186" y="128" width="26" height="14" fill="#FCC419"/>
+  <rect x="8" y="128" width="26" height="14" fill="#FCC419"/>
+  <rect x="366" y="128" width="26" height="14" fill="#FCC419"/>
+
+  <!-- bay signs -->
+  <rect x="72" y="62" width="40" height="26" rx="4" fill="#1B4965"/>
+  <text x="92" y="80" font-family="'DM Sans',system-ui,sans-serif" font-size="14" font-weight="700" fill="#FFFFFF" text-anchor="middle">B1</text>
+  <rect x="286" y="62" width="40" height="26" rx="4" fill="#1B4965"/>
+  <text x="306" y="80" font-family="'DM Sans',system-ui,sans-serif" font-size="14" font-weight="700" fill="#FFFFFF" text-anchor="middle">B2</text>
+
+  <!-- floor -->
+  <rect x="0" y="154" width="400" height="106" fill="url(#blFloor)"/>
+  <!-- bay lines in perspective -->
+  <g fill="#F1F3F5" opacity=".72">
+    <path d="M40 260 L104 160 h8 L56 260 Z"/>
+    <path d="M168 260 L188 160 h8 L184 260 Z"/>
+    <path d="M344 260 L296 160 h8 L360 260 Z"/>
+  </g>
+  <rect x="0" y="156" width="400" height="5" fill="#62D2A2" opacity=".5"/>
+
+  <!-- SUV -->
+  <g>
+    <ellipse cx="212" cy="230" rx="88" ry="11" fill="#000" opacity=".45"/>
+    <path d="M146 216 q2-46 24-50 h84 q22 4 24 50 z" fill="#1B4965"/>
+    <path d="M166 170 q5-24 18-26 h56 q13 2 18 26 z" fill="#0D1B2A"/>
+    <path d="M172 168 q4-20 15-21 h50 q11 1 15 21 z" fill="#5FA8D3" opacity=".85"/>
+    <rect x="142" y="206" width="140" height="17" rx="8" fill="#0D1B2A"/>
+    <circle cx="172" cy="223" r="16" fill="#0D1B2A"/><circle cx="172" cy="223" r="6" fill="#868E96"/>
+    <circle cx="252" cy="223" r="16" fill="#0D1B2A"/><circle cx="252" cy="223" r="6" fill="#868E96"/>
+    <rect x="140" y="200" width="13" height="8" rx="4" fill="#FFF3BF"/>
+    <rect x="271" y="200" width="13" height="8" rx="4" fill="#E03131"/>
+  </g>
+
+  <g>
+    <rect x="14" y="222" width="104" height="26" rx="13" fill="#0D1B2A" opacity=".9"/>
+    <text x="66" y="239" font-family="'DM Sans',system-ui,sans-serif" font-size="12" font-weight="700" fill="#5FA8D3" text-anchor="middle">BASEMENT</text>
+  </g>
+</svg>

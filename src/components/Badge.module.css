@@ -1,0 +1,48 @@
+/**
+ * Pill badge.
+ *
+ * Each colour is a background/foreground pair from the tint tokens, all
+ * contrast-checked — these labels are 11px, and the original orange
+ * pairing was 3.5:1, under the 4.5:1 that size needs.
+ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--ps-radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--ps-font-body);
+}
+
+.green {
+  background: var(--ps-tint-green-bg);
+  color: var(--ps-tint-green-fg);
+}
+
+.blue {
+  background: var(--ps-tint-blue-bg);
+  color: var(--ps-tint-blue-fg);
+}
+
+.orange {
+  background: var(--ps-tint-orange-bg);
+  color: var(--ps-tint-orange-fg);
+}
+
+.red {
+  background: var(--ps-tint-red-bg);
+  color: var(--ps-tint-red-fg);
+}
+
+.purple {
+  background: var(--ps-tint-purple-bg);
+  color: var(--ps-tint-purple-fg);
+}
+
+.gray {
+  background: var(--ps-color-g100);
+  color: var(--ps-color-g700);
+}

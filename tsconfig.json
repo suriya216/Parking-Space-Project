@@ -1,0 +1,44 @@
+{
+  /* The APP config, and the repo-root default an editor picks up for
+     anything under src/. Tests have their own config in tests/, which
+     Playwright and the editor resolve as the nearer one.
+
+     Deliberately not a solution-style config with `references`: a
+     referenced project may not disable emit, and every project here is
+     type-check-only (noEmit), so references would just fight us. */
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+
+    /* Strict, as chosen. noUncheckedIndexedAccess is what catches the
+       `paths[name]` style lookups the original JSX leaned on. */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "noEmit": true,
+
+    /* The app is mid-migration: .jsx files still exist alongside .tsx. */
+    "allowJs": true,
+    "checkJs": false,
+
+    /* No baseUrl: TypeScript removed that option, so these are relative
+       to this file's directory. */
+    "paths": {
+      "@/*": ["./src/*"],
+      "@shared/*": ["./shared/*"]
+    }
+  },
+  "include": ["src", "shared", "vite.config.js"]
+}

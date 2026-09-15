@@ -1,0 +1,18 @@
+node_modules
+dist
+.git
+.gitignore
+
+# Never bake secrets into an image
+.env
+.env.local
+
+# Local state — the container uses the mounted volume at /data
+server/*.db
+server/*.db-shm
+server/*.db-wal
+server/uploads
+
+# Test tooling isn't needed in the image
+e2e
+*.log

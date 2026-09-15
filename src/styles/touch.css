@@ -1,0 +1,12 @@
+/** Touch behaviour for every interactive element. */
+
+/* Removes the 300ms tap delay and the grey flash on tap in mobile
+   WebKit/Blink, which otherwise make the UI feel sluggish. Element
+   selectors rather than a class so nothing can be missed. */
+button,
+a,
+select,
+[role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}

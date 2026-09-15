@@ -1,0 +1,30 @@
+/** Header for the secondary tabs. */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.back {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--ps-radius-md);
+  background: var(--ps-color-g100);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.title {
+  font-family: var(--ps-font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ps-color-navy);
+  flex: 1;
+  min-width: 0;
+}

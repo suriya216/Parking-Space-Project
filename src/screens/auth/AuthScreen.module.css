@@ -1,0 +1,232 @@
+/** Sign-in / register screen. */
+
+.screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(
+    135deg,
+    var(--ps-color-navy) 0%,
+    var(--ps-color-blue) 100%
+  );
+  padding: 20px;
+}
+
+.card {
+  background: var(--ps-color-white);
+  border-radius: var(--ps-radius-sheet);
+  padding: 40px 32px;
+  width: 100%;
+  max-width: 420px;
+  font-family: var(--ps-font-body);
+}
+
+/* ── Wordmark ─────────────────────────────────────────────── */
+.wordmark {
+  font-family: var(--ps-font-display);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--ps-color-navy);
+  margin-bottom: 4px;
+}
+
+/* textBrand, not mint: mint on white is 1.9:1, so the second half of the
+   wordmark was barely legible. */
+.wordmarkAccent {
+  color: var(--ps-text-brand);
+}
+
+.tagline {
+  font-size: 14px;
+  color: var(--ps-text-secondary);
+  margin-bottom: 32px;
+}
+
+.heading {
+  font-family: var(--ps-font-display);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ps-color-navy);
+  margin-bottom: 24px;
+}
+
+/* ── Notice from an OAuth round trip ──────────────────────── */
+.notice {
+  background: var(--ps-tint-red-bg);
+  color: var(--ps-text-error);
+  font-size: 13px;
+  margin-bottom: 16px;
+  padding: 11px 13px;
+  border-radius: 9px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.noticeText {
+  flex: 1;
+  line-height: 1.45;
+}
+
+.noticeDismiss {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: var(--ps-text-error);
+  flex-shrink: 0;
+}
+
+/* ── Form ─────────────────────────────────────────────────── */
+.label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ps-color-g700);
+  display: block;
+  margin-bottom: 6px;
+}
+
+/* Same 16px floor as the shared Field control: below that iOS Safari
+   zooms the page on focus. */
+.input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1.5px solid var(--ps-color-g300);
+  border-radius: var(--ps-radius-md);
+  font-size: var(--ps-font-size-input);
+  font-family: var(--ps-font-body);
+  margin-bottom: 16px;
+}
+
+.inputTight {
+  margin-bottom: 8px;
+}
+
+.roleRow {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.roleButton {
+  flex: 1;
+  padding: 12px;
+  border: 1.5px solid var(--ps-color-g300);
+  background: transparent;
+  border-radius: var(--ps-radius-md);
+  font-family: var(--ps-font-body);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ps-text-secondary);
+  cursor: pointer;
+  text-transform: capitalize;
+}
+
+.roleButtonActive {
+  border: 2px solid var(--ps-color-mint);
+  background: var(--ps-tint-green-bg);
+  color: var(--ps-color-navy);
+}
+
+.forgotRow {
+  text-align: right;
+  margin-bottom: 16px;
+}
+
+.forgotLink {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+  color: var(--ps-text-link);
+  cursor: pointer;
+  font-family: var(--ps-font-body);
+  font-weight: 600;
+}
+
+.error {
+  background: var(--ps-tint-red-bg);
+  color: var(--ps-text-error);
+  font-size: 13px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: var(--ps-radius-sm);
+}
+
+.busy {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* ── SSO ──────────────────────────────────────────────────── */
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 24px 0;
+  font-size: 13px;
+  color: var(--ps-text-tertiary);
+}
+
+.dividerRule {
+  flex: 1;
+  height: 1px;
+  background: var(--ps-color-g200);
+}
+
+.ssoRow {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ssoButton {
+  flex: 1;
+  min-height: var(--ps-tap-large);
+  padding: 14px;
+  border: 1.5px solid var(--ps-color-g200);
+  border-radius: var(--ps-radius-md);
+  background: var(--ps-color-white);
+  font-family: var(--ps-font-body);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ps-color-g700);
+  cursor: pointer;
+}
+
+/* The demo buttons are labelled by provider id, so capitalise them. */
+.ssoButtonDemo {
+  text-transform: capitalize;
+}
+
+/* Real providers read "Continue with X" and wrap two-up. */
+.ssoButtonProvider {
+  flex: 1 1 40%;
+}
+
+.ssoNote {
+  font-size: 11px;
+  color: var(--ps-text-tertiary);
+  text-align: center;
+  margin-top: 8px;
+}
+
+.ssoDisabled {
+  font-size: 12px;
+  color: var(--ps-text-secondary);
+  text-align: center;
+}
+
+/* ── Mode switch ──────────────────────────────────────────── */
+.switchRow {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ps-text-secondary);
+}
+
+.switchLink {
+  color: var(--ps-text-link);
+  font-weight: 600;
+  text-decoration: none;
+}

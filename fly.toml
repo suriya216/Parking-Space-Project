@@ -1,0 +1,47 @@
+# Fly.io deployment for ParkSpace.
+#
+# `app` must be globally unique — change it before the first deploy, or
+# let `fly launch` pick it and rewrite this file.
+
+app = "parkspace"
+primary_region = "sin"          # Singapore: closest Fly region to Chennai
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3001"
+  DATA_DIR = "/data"
+  # Published test passwords and one-tap fake SSO stay off in public.
+  # Set to "true" only if you want an open demo and accept that anyone
+  # can sign in as the seeded accounts.
+  DEMO_MODE = "false"
+
+# SQLite and uploaded photos live on this volume, so they survive
+# redeploys. Create it once:
+#   fly volumes create parkspace_data --region sin --size 1
+[mounts]
+  source = "parkspace_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  # A single machine: SQLite is a local file, so two machines would each
+  # have their own copy and silently diverge. Scale up only after moving
+  # to a shared database.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

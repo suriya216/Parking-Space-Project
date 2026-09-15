@@ -1,0 +1,52 @@
+/** List row, used by the profile menu and every list-style screen. */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--ps-color-g100);
+  cursor: default;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.iconBox {
+  width: var(--ps-tap-min);
+  height: var(--ps-tap-min);
+  border-radius: var(--ps-radius-md);
+  background: var(--ps-color-g100);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* min-width:0 lets the label ellipsise instead of forcing the row wide. */
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+.label {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ps-color-navy);
+}
+
+.value {
+  font-size: 12px;
+  color: var(--ps-text-secondary);
+  margin-top: 1px;
+}
+
+.danger {
+  color: var(--ps-color-red);
+}
+
+.chevron {
+  color: var(--ps-text-tertiary);
+  font-size: 18px;
+}
