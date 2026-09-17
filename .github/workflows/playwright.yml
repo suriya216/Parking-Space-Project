@@ -1,0 +1,34 @@
+name: Playwright Tests
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  # Weekly regression run: Mondays at 02:00 UTC (07:30 IST).
+  # Cron has no "every 7 days" — a fixed weekday IS the 1-week interval.
+  schedule:
+    - cron: '0 2 * * 1'
+  # Lets you trigger the same job by hand from the Actions tab, so you
+  # don't have to wait a week to find out the schedule works.
+  workflow_dispatch:
+jobs:
+  test:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: lts/*
+    - name: Install dependencies
+      run: npm ci
+    - name: Install Playwright Browsers
+      run: npx playwright install --with-deps
+    - name: Run Playwright tests
+      run: npx playwright test
+    - uses: actions/upload-artifact@v4
+      if: ${{ !cancelled() }}
+      with:
+        name: playwright-report
+        path: playwright-report/
+        retention-days: 30
