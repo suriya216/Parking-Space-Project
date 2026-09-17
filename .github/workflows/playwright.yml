@@ -1,15 +1,13 @@
 name: Playwright Tests
+# The full suite is expensive (388 tests, three browser engines), so it runs
+# at exactly one point: when code lands on main. Not on pull requests, not
+# on feature branches — lint.yml covers those. A PR merged into main still
+# triggers this, because a merge IS a push to main.
 on:
   push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-  # Weekly regression run: Mondays at 02:00 UTC (07:30 IST).
-  # Cron has no "every 7 days" — a fixed weekday IS the 1-week interval.
-  schedule:
-    - cron: '0 2 * * 1'
-  # Lets you trigger the same job by hand from the Actions tab, so you
-  # don't have to wait a week to find out the schedule works.
+    branches: [ main ]
+  # Lets you trigger the suite by hand from the Actions tab against any
+  # branch, so you can get a full run before merging when you want one.
   workflow_dispatch:
 jobs:
   test:
