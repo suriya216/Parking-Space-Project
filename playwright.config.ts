@@ -20,6 +20,9 @@ const MOBILE_CONTEXT = {
 /** Set DEVICE_MATRIX=1 to add the small-phone and tablet profiles. */
 const WIDE_MATRIX = Boolean(process.env.DEVICE_MATRIX);
 
+/** Set VIDEO=1 to record every test, not just the ones that fail. */
+const FULL_VIDEO = Boolean(process.env.VIDEO);
+
 /**
  * ParkSpace end-to-end configuration.
  *
@@ -62,9 +65,28 @@ export default defineConfig({
        tests that pass in isolation every time. Raising the budget is the
        honest fix; local retries would just hide it. */
     actionTimeout: 30_000,
-    trace: "on-first-retry",
-    screenshot: "only-on-failure",
-    video: IS_CI ? "retain-on-failure" : "off",
+    /* ── Evidence capture ──────────────────────────────────
+       Screenshots and traces are captured on CI for every test, pass or
+       fail: the HTML report is the run's evidence record, not just a
+       debugging aid, and a green test with no artefacts proves nothing
+       to anyone reading the report later. The reporter copies them into
+       playwright-report/data/, so the uploaded artifact is
+       self-contained.
+
+       Video is deliberately NOT on by default. Capturing it for every
+       test across three UI projects added the bulk of the artifact size
+       — a video per test dwarfs a screenshot and a trace combined — for
+       evidence the trace already carries as a scrubbable snapshot
+       timeline. Failures still get one, which is when watching a
+       recording actually tells you something. Set VIDEO=1 for a run that
+       records everything, e.g. a release sign-off bundle.
+
+       Locally the failure-only settings stay: a full-capture run is
+       slower and large, a bad trade when you can just re-run the one
+       test you care about. */
+    trace: IS_CI ? "on" : "on-first-retry",
+    screenshot: IS_CI ? "on" : "only-on-failure",
+    video: FULL_VIDEO ? "on" : IS_CI ? "retain-on-failure" : "off",
     testIdAttribute: "data-testid",
   },
 
@@ -93,8 +115,8 @@ export default defineConfig({
          desktop  → layout at width, not a different input device
 
        The viewports are not interchangeable either. src/styles/layout.css
-       switches on height as well as width, and an iPhone 13 is 664px tall
-       — inside `@media (max-height: 700px)` — while a Pixel 7 is 839px
+       switches on height as well as width, and an iPhone 17 is 681px tall
+       — inside `@media (max-height: 700px)` — while a Pixel 10 is 732px
        and outside it. So the two phones exercise different CSS branches
        rather than repeating each other.
 
@@ -106,12 +128,12 @@ export default defineConfig({
     {
       name: "ios",
       testMatch: /specs\/ui\/.*\.spec\.ts$/,
-      use: { ...devices["iPhone 13"], ...MOBILE_CONTEXT },
+      use: { ...devices["iPhone 17"], ...MOBILE_CONTEXT },
     },
     {
       name: "android",
       testMatch: /specs\/ui\/.*\.spec\.ts$/,
-      use: { ...devices["Pixel 7"], ...MOBILE_CONTEXT },
+      use: { ...devices["Pixel 10"], ...MOBILE_CONTEXT },
     },
     {
       name: "desktop",

@@ -26,9 +26,17 @@ jobs:
       run: npx playwright install --with-deps
     - name: Run Playwright tests
       run: npx playwright test
-    - uses: actions/upload-artifact@v4
+    # The HTML reporter copies every attachment — videos, screenshots and
+    # trace zips — into playwright-report/data/, so this one directory is
+    # the complete evidence bundle. `!cancelled()` is what makes it upload
+    # on a failing run, which is when you actually need it.
+    - name: Upload Playwright report (video, screenshots, traces)
+      uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
       with:
         name: playwright-report
         path: playwright-report/
         retention-days: 30
+        # webm video and trace zips are already compressed; re-zipping them
+        # costs minutes of CI time and saves almost nothing.
+        compression-level: 0
