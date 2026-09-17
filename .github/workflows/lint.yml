@@ -1,0 +1,38 @@
+name: Lint
+# The cheap checks, run everywhere: every branch you push and every pull
+# request. This is the counterpart to playwright.yml, which is restricted to
+# main — you get fast feedback on a feature branch without paying for a
+# 388-test browser matrix on each commit.
+on:
+  push:
+    branches: [ '**' ]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch makes the in-flight run pointless, so
+# cancel it rather than queueing both.
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: lts/*
+        cache: npm
+    - name: Install dependencies
+      run: npm ci
+    # `npm run lint` is oxlint plus scripts/encoding-check.mjs.
+    - name: Lint
+      run: npm run lint
+    # Separate step so a red run tells you which of the two failed without
+    # opening the log. `if: !cancelled()` runs the typecheck even when lint
+    # fails, so one push reports every problem instead of just the first.
+    - name: Typecheck
+      if: ${{ !cancelled() }}
+      run: npm run typecheck
