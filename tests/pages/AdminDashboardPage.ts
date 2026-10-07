@@ -47,16 +47,16 @@ export class AdminDashboardPage extends BasePage {
   async deleteUser(email: string): Promise<void> {
     const row = this.el.userByEmail(email);
     await row.waitFor({ state: "visible" });
-    this.acceptNextConfirm();
     await row.getByTestId(TID.adminUserDelete).click();
+    await this.acceptConfirmDialog();
   }
 
   /** Attempt a delete but decline the confirmation. */
   async declineDeleteUser(email: string): Promise<void> {
     const row = this.el.userByEmail(email);
     await row.waitFor({ state: "visible" });
-    this.dismissNextConfirm();
     await row.getByTestId(TID.adminUserDelete).click();
+    await this.declineConfirmDialog();
   }
 
   /**
@@ -81,8 +81,8 @@ export class AdminDashboardPage extends BasePage {
   async deleteSpotByName(name: string): Promise<void> {
     const row = this.el.spotByName(name);
     await row.waitFor({ state: "visible" });
-    this.acceptNextConfirm();
     await row.getByTestId(TID.adminSpotDelete).click();
+    await this.acceptConfirmDialog();
     await row.waitFor({ state: "detached" });
   }
 }

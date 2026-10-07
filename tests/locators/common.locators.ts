@@ -34,8 +34,22 @@ export const sheetLocators = (page: Page) => ({
   close: page.getByTestId(TID.sheetClose),
 });
 
+/**
+ * The centered yes/no modal that replaced `window.confirm()` for every
+ * destructive action (cancel booking, delete listing, delete user, delete
+ * spot). One dialog, reused by all four, so one locator set covers them.
+ */
+export const confirmDialogLocators = (page: Page) => ({
+  dialog: page.getByTestId(TID.confirmDialog),
+  message: page.getByTestId(TID.confirmDialogMessage),
+  confirm: page.getByTestId(TID.confirmDialogConfirm),
+  cancel: page.getByTestId(TID.confirmDialogCancel),
+  error: page.getByTestId(TID.confirmDialogError),
+});
+
 export type ChromeLocators = ReturnType<typeof chromeLocators>;
 export type SheetLocators = ReturnType<typeof sheetLocators>;
+export type ConfirmDialogLocators = ReturnType<typeof confirmDialogLocators>;
 
 /** Nth row of a repeated, test-id'd list. */
 export const nthByTestId = (page: Page, id: string, index: number): Locator =>

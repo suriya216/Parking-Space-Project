@@ -119,6 +119,12 @@ db.exec(
    ON users(provider, provider_id) WHERE provider_id IS NOT NULL`
 );
 addColumnIfMissing("spots", "created_by", "INTEGER REFERENCES users(id)");
+// date/time were added to the CREATE TABLE above after some local
+// databases already had a bookings table without them; without this,
+// createBooking's INSERT fails with "no such column: date" on any db
+// created before that change.
+addColumnIfMissing("bookings", "date", "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing("bookings", "time", "TEXT NOT NULL DEFAULT ''");
 // ISO timestamp of when the slot starts. Needed so extending a booking can
 // recompute the end of the window rather than showing a vague "Nh from now".
 addColumnIfMissing("bookings", "start_at", "TEXT");

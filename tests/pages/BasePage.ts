@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 
-import { chromeLocators, sheetLocators } from "@locators/common.locators";
+import { chromeLocators, confirmDialogLocators, sheetLocators } from "@locators/common.locators";
 
 /**
  * Shared page-object behaviour.
@@ -15,10 +15,12 @@ import { chromeLocators, sheetLocators } from "@locators/common.locators";
 export abstract class BasePage {
   readonly chrome: ReturnType<typeof chromeLocators>;
   readonly sheet: ReturnType<typeof sheetLocators>;
+  readonly confirmDialog: ReturnType<typeof confirmDialogLocators>;
 
   constructor(protected readonly page: Page) {
     this.chrome = chromeLocators(page);
     this.sheet = sheetLocators(page);
+    this.confirmDialog = confirmDialogLocators(page);
   }
 
   /** Navigate to a path and wait for React to have rendered. */
@@ -64,24 +66,21 @@ export abstract class BasePage {
   }
 
   /**
-   * Accept the next `window.confirm`.
-   *
-   * The app guards its four destructive actions with `window.confirm`
-   * (cancel booking, delete listing, delete user, delete spot). Playwright
-   * auto-dismisses dialogs, which silently declines the confirmation and
-   * makes the action look broken — so any page object driving one of
-   * those must arm this first.
+   * Confirm the open yes/no modal (cancel booking, delete listing, delete
+   * user, delete spot all share it — see confirmDialogLocators). Waits for
+   * it to appear, then for it to close, since a confirmed action runs for
+   * real and the dialog only dismisses once that finishes.
    */
-  protected acceptNextConfirm(): void {
-    this.page.once("dialog", (dialog) => {
-      void dialog.accept();
-    });
+  protected async acceptConfirmDialog(): Promise<void> {
+    await this.confirmDialog.dialog.waitFor({ state: "visible" });
+    await this.confirmDialog.confirm.click();
+    await this.confirmDialog.dialog.waitFor({ state: "detached" });
   }
 
-  /** Decline the next `window.confirm` — for "cancel the cancel" specs. */
-  protected dismissNextConfirm(): void {
-    this.page.once("dialog", (dialog) => {
-      void dialog.dismiss();
-    });
+  /** Decline the open confirm dialog — for "cancel the cancel" specs. */
+  protected async declineConfirmDialog(): Promise<void> {
+    await this.confirmDialog.dialog.waitFor({ state: "visible" });
+    await this.confirmDialog.cancel.click();
+    await this.confirmDialog.dialog.waitFor({ state: "detached" });
   }
 }

@@ -92,10 +92,10 @@ password**, with one-tap login buttons. Seven UI suites authenticated by
 clicking those buttons, which meant none of them ever exercised the login
 form, and the app shipped its own credentials to every visitor.
 
-The panel is gone. `specs/ui/auth.spec.ts` drives the real form, and the
-fixture now carries the cases a visible panel could not express: wrong
-passwords, unknown accounts, whitespace and case variants, empty fields,
-and unique-per-run registration payloads.
+The panel is gone. `specs/ui/auth-journey.spec.ts` drives the real form,
+and the fixture now carries the cases a visible panel could not express:
+wrong passwords, unknown accounts, whitespace and case variants, empty
+fields, and unique-per-run registration payloads.
 
 `GET /api/demo-accounts` still exists, still gated by `DEMO_MODE`, purely
 so the production specs can keep asserting it 404s on a public
@@ -110,9 +110,11 @@ deployment. Nothing in the UI calls it.
   process, so a timestamp plus a module-level counter collides across
   workers. `newAccount()` and `stamp()` mix in `process.pid` and a random
   block for this reason.
-- **Four actions go through `window.confirm`** (cancel booking, delete
-  listing, delete user, delete spot). Playwright auto-dismisses dialogs,
-  so page objects must arm `acceptNextConfirm()` first.
+- **Four actions go through a custom confirm modal**, not
+  `window.confirm` (cancel booking, delete listing, delete user, delete
+  spot). It's a real React component (`ConfirmDialog`), so page objects
+  click through it like any other sheet — `BasePage.acceptConfirmDialog()`
+  / `declineConfirmDialog()` — rather than arming a native dialog handler.
 - **The duration control is a stepper, not a field**, and the max-price
   filter is `<input type="range">` driven by React state — neither can be
   `fill()`ed. See `SpotDetailPage.setHours` and
@@ -150,16 +152,34 @@ find where a given piece of old coverage went.
 | `e2e/api.test.mjs` | `specs/api/auth.api.spec.ts`, `spots.api.spec.ts` |
 | `e2e/booking-time.mjs` | `specs/api/bookings.api.spec.ts` |
 | `e2e/features.test.mjs` | `specs/api/spots.api.spec.ts` |
-| `e2e/oauth.test.mjs` | `specs/api/oauth.api.spec.ts`, `specs/ui/oauth-return.spec.ts` |
+| `e2e/oauth.test.mjs` | `specs/api/oauth.api.spec.ts`, `specs/ui/auth-journey.spec.ts` (OAuth return block) |
 | — (new) | `specs/api/apple.api.spec.ts` — Sign in with Apple against a fake Apple |
-| — (new) | `specs/ui/navigation.spec.ts` — browser Back across every surface |
 | — (new) | `specs/unit/tokens.spec.ts` — CSS/TS design-token drift guard |
 | `e2e/production.test.mjs` | `specs/api/production.api.spec.ts` |
-| `e2e/drive.mjs` | `specs/ui/booking.spec.ts`, `profile.spec.ts`, `owner.spec.ts`, `admin.spec.ts` |
-| `e2e/ui-features.test.mjs` | `specs/ui/driver-home.spec.ts` |
-| `e2e/recovery.test.mjs` | `specs/ui/recovery.spec.ts` |
-| `e2e/location.test.mjs` | `specs/ui/driver-home.spec.ts` (`location` describe) |
+| `e2e/drive.mjs` | `specs/ui/driver-journey.spec.ts`, `owner-journey.spec.ts`, `admin-journey.spec.ts` |
+| `e2e/ui-features.test.mjs` | `specs/ui/driver-journey.spec.ts` |
+| `e2e/recovery.test.mjs` | `specs/ui/driver-journey.spec.ts` (error-recovery block), `auth-journey.spec.ts` (session-expiry block) |
+| `e2e/location.test.mjs` | `specs/ui/driver-journey.spec.ts` (`search and location` describe) |
 | `e2e/mobile.test.mjs` | the `mobile` / `desktop` projects |
+
+### UI specs are journeys, not one-test-per-assertion
+
+`specs/ui/*.spec.ts` are deliberately few and long: `auth-journey`,
+`driver-journey`, `owner-journey`, `admin-journey`. Each chains several
+steps that used to be separate specs, because the UI projects (iOS,
+Android, desktop) run every spec three times — the cost that's actually
+being cut here is the sign-in-and-navigate each separate test used to pay
+for on top of the assertion it existed to make, not the assertion itself.
+`specs/api/*` and `specs/unit/*` aren't affected; they don't run per
+device, so splitting them finer doesn't cost the same multiplier.
+
+The trade: a failure partway through a long journey takes more reading
+to localise than a single-assertion spec would, since several prior
+steps had to succeed first. Keep new UI coverage in this style — add a
+step to the relevant journey rather than a new file — unless what you're
+adding genuinely can't share a session with the rest (a fresh account
+whose row count the test relies on, a destructive action whose outcome
+would corrupt later steps, or a case that needs the app reloaded).
 | `e2e/ux-audit.mjs` | not ported — a screenshot-gathering tool, not a test |
 | `e2e/encoding-check.mjs` | kept as `scripts/encoding-check.mjs` — repo hygiene, not a test; now runs as part of `npm run lint` |
 | `e2e/encoding-repair.mjs` | kept as `scripts/encoding-repair.mjs` |
