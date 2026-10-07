@@ -37,19 +37,19 @@ export class BookingsPage extends BasePage {
   async cancelByRef(ref: string): Promise<void> {
     const card = this.el.cardByRef(ref);
     await card.waitFor({ state: "visible" });
-    this.acceptNextConfirm();
     await card.getByTestId(TID.bookingCancel).click();
+    await this.acceptConfirmDialog();
   }
 
   async cancelAt(index = 0): Promise<void> {
-    this.acceptNextConfirm();
     await this.el.cancel.nth(index).click();
+    await this.acceptConfirmDialog();
   }
 
   /** Click Cancel but decline the confirmation — nothing should change. */
   async declineCancelAt(index = 0): Promise<void> {
-    this.dismissNextConfirm();
     await this.el.cancel.nth(index).click();
+    await this.declineConfirmDialog();
   }
 
   async extendAt(index = 0): Promise<void> {

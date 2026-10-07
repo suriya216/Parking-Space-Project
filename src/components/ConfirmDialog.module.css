@@ -1,0 +1,45 @@
+/**
+ * Centered confirmation modal. Deliberately not a Sheet: a bottom sheet
+ * reads as "more detail about to appear", which is wrong for a yes/no
+ * decision that should be read and answered in one glance.
+ */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--ps-overlay-backdrop);
+  z-index: var(--ps-z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.panel {
+  background: var(--ps-color-white);
+  width: 100%;
+  max-width: 360px;
+  border-radius: var(--ps-radius-lg);
+  padding: 22px 20px;
+  font-family: var(--ps-font-body);
+}
+
+.title {
+  font-family: var(--ps-font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ps-color-navy);
+  margin-bottom: 8px;
+}
+
+.message {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ps-text-secondary);
+  margin-bottom: 18px;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+}

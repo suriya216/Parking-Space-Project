@@ -10,6 +10,9 @@ export type { BadgeColor, BadgeProps } from "./Badge";
 export { Sheet } from "./Sheet";
 export type { SheetProps } from "./Sheet";
 
+export { ConfirmDialog } from "./ConfirmDialog";
+export type { ConfirmDialogProps } from "./ConfirmDialog";
+
 export { Field, Notice, Select } from "./form";
 export type {
   FieldProps,

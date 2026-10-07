@@ -61,6 +61,13 @@ export const TID = {
   sheetTitle: "sheet-title",
   sheetClose: "sheet-close",
 
+  // generic yes/no confirmation modal (replaces window.confirm)
+  confirmDialog: "confirm-dialog",
+  confirmDialogMessage: "confirm-dialog-message",
+  confirmDialogConfirm: "confirm-dialog-confirm",
+  confirmDialogCancel: "confirm-dialog-cancel",
+  confirmDialogError: "confirm-dialog-error",
+
   // ─── driver home ──────────────────────────────────────
   driverHome: "driver-home",
   searchInput: "search-input",
@@ -209,9 +216,13 @@ export const TID = {
   adminUserRow: "admin-user-row",
   adminUserRole: "admin-user-role",
   adminUserDelete: "admin-user-delete",
+  adminUserSearch: "admin-user-search",
+  adminUsersEmpty: "admin-users-empty",
   adminSpotRow: "admin-spot-row",
   adminSpotVerify: "admin-spot-verify",
   adminSpotDelete: "admin-spot-delete",
+  adminSpotSearch: "admin-spot-search",
+  adminSpotsEmpty: "admin-spots-empty",
 } as const;
 
 export type TestId = (typeof TID)[keyof typeof TID];

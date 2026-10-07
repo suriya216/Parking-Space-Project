@@ -24,6 +24,7 @@ import {
 } from "./components";
 import { useBackGuard } from "./hooks/useBackGuard";
 import { useGeolocation } from "./hooks/useGeolocation";
+import { useConfirm } from "./hooks/useConfirm";
 // MapView owns the main Leaflet surface. The two small inline maps below
 // (the read-only one on spot detail, and the add-spot location picker)
 // still compose react-leaflet directly, and reuse the price marker.
@@ -1277,6 +1278,7 @@ const OwnerDashboard = ({ user, token, onLogout }) => {
 
   const [earnings, setEarnings] = useState(null);
   const [bookings, setBookings] = useState([]);
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const loadSpots = useCallback(() => {
     let cancelled = false;
@@ -1300,14 +1302,16 @@ const OwnerDashboard = ({ user, token, onLogout }) => {
   // rename can't detach an owner from their listings.
   const myListings = spots.filter(s => s.created_by === user.id);
 
-  const removeListing = async (spot) => {
-    if (!window.confirm(`Delete “${spot.name}”? This cannot be undone.`)) return;
-    try {
-      await api.deleteSpot(token, spot.id);
-      setSpots(prev => prev.filter(s => s.id !== spot.id));
-    } catch (e) {
-      setSpotsErr(e.message);
-    }
+  const removeListing = (spot) => {
+    confirm({
+      title: `Delete "${spot.name}"?`,
+      message: "This cannot be undone.",
+      confirmLabel: "Delete listing",
+      action: async () => {
+        await api.deleteSpot(token, spot.id);
+        setSpots(prev => prev.filter(s => s.id !== spot.id));
+      },
+    });
   };
 
   return (
@@ -1448,6 +1452,10 @@ const OwnerDashboard = ({ user, token, onLogout }) => {
         {activeTab === "earnings" && (
           <>
             <div style={{ fontFamily: fontD, fontSize: 16, fontWeight: 600, color: COLORS.navy, marginBottom: 16 }}>Payout history</div>
+            <Notice tone="info">
+              Illustrative — payouts aren't wired up in this build. Your real
+              revenue and booking count are on the Dashboard tab.
+            </Notice>
             {[
               { date: "1 Sep 2026", amount: "₹8,200", status: "Paid" },
               { date: "15 Aug 2026", amount: "₹11,450", status: "Paid" },
@@ -1479,6 +1487,7 @@ const OwnerDashboard = ({ user, token, onLogout }) => {
           }}
         />
       )}
+      {confirmDialog}
     </div>
   );
 };
@@ -1518,6 +1527,7 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
   const [bookingsErr, setBookingsErr] = useState("");
   const [sheet, setSheet] = useState(null); // filter | profile | vehicles | cards | settings | safety
   const [advanced, setAdvanced] = useState({ maxPrice: 0, verifiedOnly: false, sort: "distance" });
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const savePrefs = (next) => setPrefs(prefsLib.save(next));
 
@@ -1587,14 +1597,16 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
     }
   };
 
-  const cancelBooking = async (b) => {
-    if (!window.confirm(`Cancel booking ${b.ref} at ${b.spot.name}?`)) return;
-    try {
-      const d = await api.cancelBooking(token, b.id);
-      setBookings(prev => prev.map(x => x.id === d.booking.id ? d.booking : x));
-    } catch (e) {
-      setBookingsErr(e.message);
-    }
+  const cancelBooking = (b) => {
+    confirm({
+      title: "Cancel this booking?",
+      message: `${b.ref} at ${b.spot.name}.`,
+      confirmLabel: "Cancel booking",
+      action: async () => {
+        const d = await api.cancelBooking(token, b.id);
+        setBookings(prev => prev.map(x => x.id === d.booking.id ? d.booking : x));
+      },
+    });
   };
 
   const extendBooking = async (b) => {
@@ -2019,6 +2031,7 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
       {sheet === "safety" && (
         <SafetySheet user={user} onClose={() => setSheet(null)} onSignOut={onLogout} />
       )}
+      {confirmDialog}
     </div>
   );
 };
@@ -2037,6 +2050,15 @@ const AdminDashboard = ({ user, token, onLogout }) => {
   // Same as the owner console: Spots is a navigation away from Users, so
   // Back belongs to the app, not the browser's session history.
   useBackGuard(tab !== "users", () => setTab("users"));
+
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  // Ids currently mid-request for a non-confirmed action, so the control
+  // that triggered it can disable itself and a double-click can't fire a
+  // second request while the first is still in flight.
+  const [roleBusy, setRoleBusy] = useState(null);
+  const [verifyBusy, setVerifyBusy] = useState(null);
+  const [userQuery, setUserQuery] = useState("");
+  const [spotQuery, setSpotQuery] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2061,53 +2083,71 @@ const AdminDashboard = ({ user, token, onLogout }) => {
 
   const changeRole = async (target, role) => {
     setErr("");
+    setRoleBusy(target.id);
     try {
       const d = await api.setUserRole(token, target.id, role);
       setUsers(prev => prev.map(u => u.id === d.user.id ? d.user : u));
       load();
     } catch (e) {
       setErr(e.message);
+    } finally {
+      setRoleBusy(null);
     }
   };
 
-  const removeUser = async (target) => {
-    if (!window.confirm(`Delete ${target.name} (${target.email})? Their bookings go too.`)) return;
-    setErr("");
-    try {
-      await api.deleteUser(token, target.id);
-      setUsers(prev => prev.filter(u => u.id !== target.id));
-      load();
-    } catch (e) {
-      setErr(e.message);
-    }
+  const removeUser = (target) => {
+    confirm({
+      title: `Delete ${target.name}?`,
+      message: `${target.email} — their bookings go too. This cannot be undone.`,
+      confirmLabel: "Delete user",
+      action: async () => {
+        await api.deleteUser(token, target.id);
+        setUsers(prev => prev.filter(u => u.id !== target.id));
+        load();
+      },
+    });
   };
 
   const toggleVerified = async (spot) => {
     setErr("");
+    setVerifyBusy(spot.id);
     try {
       const d = await api.setSpotVerified(token, spot.id, !spot.verified);
       setSpots(prev => prev.map(s => s.id === d.spot.id ? d.spot : s));
     } catch (e) {
       setErr(e.message);
+    } finally {
+      setVerifyBusy(null);
     }
   };
 
-  const removeSpot = async (spot) => {
-    if (!window.confirm(`Delete “${spot.name}”? This cannot be undone.`)) return;
-    setErr("");
-    try {
-      await api.deleteSpot(token, spot.id);
-      setSpots(prev => prev.filter(s => s.id !== spot.id));
-      load();
-    } catch (e) {
-      setErr(e.message);
-    }
+  const removeSpot = (spot) => {
+    confirm({
+      title: `Delete "${spot.name}"?`,
+      message: "This cannot be undone.",
+      confirmLabel: "Delete listing",
+      action: async () => {
+        await api.deleteSpot(token, spot.id);
+        setSpots(prev => prev.filter(s => s.id !== spot.id));
+        load();
+      },
+    });
   };
 
   const cards = [
     ["Users", stats?.total], ["Spots", stats?.spots],
     ["Bookings", stats?.bookings], ["Owners", stats?.owners],
   ];
+
+  const uq = userQuery.trim().toLowerCase();
+  const filteredUsers = uq
+    ? users.filter(u => u.name.toLowerCase().includes(uq) || u.email.toLowerCase().includes(uq) || u.role.toLowerCase().includes(uq))
+    : users;
+
+  const sq = spotQuery.trim().toLowerCase();
+  const filteredSpots = sq
+    ? spots.filter(s => s.name.toLowerCase().includes(sq) || s.owner.toLowerCase().includes(sq) || s.type.toLowerCase().includes(sq))
+    : spots;
 
   return (
     <div className="ps-screen-min-h" data-testid={TID.adminDashboard} style={{ background: COLORS.g50, fontFamily: fontB }}>
@@ -2151,14 +2191,26 @@ const AdminDashboard = ({ user, token, onLogout }) => {
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <div style={{ fontFamily: fontD, fontSize: 16, fontWeight: 600, color: COLORS.navy }}>
-                Registered users {!loading && `(${users.length})`}
+                Registered users {!loading && `(${filteredUsers.length}${uq ? ` of ${users.length}` : ""})`}
               </div>
               <Btn size="sm" variant="ghost" onClick={load}>{loading ? "Loading…" : "Refresh"}</Btn>
             </div>
+            <Field
+              label="Search by name, email or role"
+              value={userQuery}
+              onChange={e => setUserQuery(e.target.value)}
+              placeholder="e.g. owner, priya@..."
+              data-testid={TID.adminUserSearch}
+            />
             {loading && users.length === 0 && (
               <div style={{ textAlign: "center", padding: 40, color: COLORS.textTertiary, fontSize: 14 }}>Loading users…</div>
             )}
-            {users.map(u => (
+            {!loading && users.length > 0 && filteredUsers.length === 0 && (
+              <div data-testid={TID.adminUsersEmpty} style={{ textAlign: "center", padding: 40, color: COLORS.textTertiary, fontSize: 14 }}>
+                No users match "{userQuery}".
+              </div>
+            )}
+            {filteredUsers.map(u => (
               <div key={u.id} data-testid={TID.adminUserRow} {...record(RECORD_ATTR.user, u.id)} style={{ display: "flex", alignItems: "center", gap: 12, padding: 14, borderRadius: 12, border: `1px solid ${COLORS.g200}`, marginBottom: 10, background: COLORS.white }}>
                 <div style={{ width: 42, height: 42, borderRadius: "50%", background: `linear-gradient(135deg, ${COLORS.blue}, ${COLORS.teal})`, color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 15, fontFamily: fontD, flexShrink: 0 }}>
                   {u.name.charAt(0).toUpperCase()}
@@ -2174,14 +2226,16 @@ const AdminDashboard = ({ user, token, onLogout }) => {
                     <select
                       value={u.role}
                       onChange={e => changeRole(u, e.target.value)}
+                      disabled={roleBusy === u.id}
                       aria-label={`Role for ${u.name}`}
                       data-testid={TID.adminUserRole}
-                      style={{ padding: "5px 8px", borderRadius: 7, border: `1px solid ${COLORS.g300}`, fontFamily: fontB, fontSize: 12, cursor: "pointer", background: COLORS.white }}
+                      style={{ padding: "5px 8px", borderRadius: 7, border: `1px solid ${COLORS.g300}`, fontFamily: fontB, fontSize: 12, cursor: roleBusy === u.id ? "wait" : "pointer", background: COLORS.white, opacity: roleBusy === u.id ? 0.6 : 1 }}
                     >
                       {["driver", "owner", "admin"].map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
                     <button
                       onClick={() => removeUser(u)}
+                      disabled={roleBusy === u.id}
                       aria-label={`Delete user ${u.name}`}
                       data-testid={TID.adminUserDelete}
                       style={{ padding: "5px 10px", borderRadius: 7, border: `1px solid ${COLORS.red}`, background: COLORS.white, color: COLORS.textError, fontFamily: fontB, fontSize: 12, fontWeight: 600, cursor: "pointer" }}
@@ -2206,12 +2260,24 @@ const AdminDashboard = ({ user, token, onLogout }) => {
         {tab === "spots" && (
           <>
             <div style={{ fontFamily: fontD, fontSize: 16, fontWeight: 600, color: COLORS.navy, marginBottom: 12 }}>
-              All listings {!loading && `(${spots.length})`}
+              All listings {!loading && `(${filteredSpots.length}${sq ? ` of ${spots.length}` : ""})`}
             </div>
+            <Field
+              label="Search by name, owner or type"
+              value={spotQuery}
+              onChange={e => setSpotQuery(e.target.value)}
+              placeholder="e.g. Covered, Lakshmi..."
+              data-testid={TID.adminSpotSearch}
+            />
             {loading && spots.length === 0 && (
               <div style={{ textAlign: "center", padding: 40, color: COLORS.textTertiary, fontSize: 14 }}>Loading listings…</div>
             )}
-            {spots.map(s => (
+            {!loading && spots.length > 0 && filteredSpots.length === 0 && (
+              <div data-testid={TID.adminSpotsEmpty} style={{ textAlign: "center", padding: 40, color: COLORS.textTertiary, fontSize: 14 }}>
+                No listings match "{spotQuery}".
+              </div>
+            )}
+            {filteredSpots.map(s => (
               <div key={s.id} data-testid={TID.adminSpotRow} {...record(RECORD_ATTR.spot, s.id)} style={{ display: "flex", gap: 12, padding: 14, borderRadius: 12, border: `1px solid ${COLORS.g200}`, marginBottom: 10, background: COLORS.white }}>
                 <img src={s.photo} alt={`${s.type} parking at ${s.name}`} loading="lazy" style={{ width: 62, height: 50, borderRadius: 9, objectFit: "cover", flexShrink: 0, background: COLORS.g100 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -2228,15 +2294,17 @@ const AdminDashboard = ({ user, token, onLogout }) => {
                         can tell one row's buttons from another's. */}
                     <button
                       onClick={() => toggleVerified(s)}
+                      disabled={verifyBusy === s.id}
                       aria-label={`${s.verified ? "Unverify" : "Verify"} ${s.name}`}
                       data-testid={TID.adminSpotVerify}
                       style={{
                         padding: "5px 10px", borderRadius: 7, border: `1px solid ${s.verified ? COLORS.g300 : COLORS.textSuccess}`,
                         background: COLORS.white, color: s.verified ? COLORS.g700 : COLORS.textSuccess,
-                        fontFamily: fontB, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                        fontFamily: fontB, fontSize: 12, fontWeight: 600, cursor: verifyBusy === s.id ? "wait" : "pointer",
+                        opacity: verifyBusy === s.id ? 0.6 : 1,
                       }}
                     >
-                      {s.verified ? "Unverify" : "Verify"}
+                      {verifyBusy === s.id ? "…" : s.verified ? "Unverify" : "Verify"}
                     </button>
                     <button
                       onClick={() => removeSpot(s)}
@@ -2253,6 +2321,7 @@ const AdminDashboard = ({ user, token, onLogout }) => {
           </>
         )}
       </div>
+      {confirmDialog}
     </div>
   );
 };

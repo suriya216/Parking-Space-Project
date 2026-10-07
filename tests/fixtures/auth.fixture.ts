@@ -6,7 +6,7 @@
  * after an API login — a few hundred milliseconds instead of a full form
  * round trip per test, and no dependency on the login UI staying put.
  *
- * The specs that ARE about signing in (tests/specs/ui/auth.spec.ts) drive
+ * The specs that ARE about signing in (tests/specs/ui/auth-journey.spec.ts) drive
  * the real form through AuthPage instead. Both paths matter; conflating
  * them is how a suite ends up with 40 tests that all fail when one label
  * on the login screen changes.

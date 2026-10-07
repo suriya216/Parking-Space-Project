@@ -81,12 +81,12 @@ export class OwnerDashboardPage extends BasePage {
     await this.addSpot.submit.click();
   }
 
-  /** Delete one of this owner's own listings (guarded by window.confirm). */
+  /** Delete one of this owner's own listings (guarded by a confirm dialog). */
   async deleteListingByName(name: string): Promise<void> {
     const row = this.el.listingByName(name);
     await row.waitFor({ state: "visible" });
-    this.acceptNextConfirm();
     await row.getByRole("button", { name: /delete/i }).click();
+    await this.acceptConfirmDialog();
     await row.waitFor({ state: "detached" });
   }
 }
