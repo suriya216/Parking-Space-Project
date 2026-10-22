@@ -19,9 +19,10 @@ import type {
   AdminStats,
   AuthProviders,
   Booking,
+  BookingPass,
   OwnerEarnings,
   PasswordResetResult,
-  PaymentMethod,
+  PaymentInput,
   Place,
   Role,
   Session,
@@ -125,8 +126,16 @@ export class ApiClient {
     return res.data;
   }
 
+  /**
+   * Registering with an email that already exists is not an error when the
+   * password matches: the role is added to that account, so the response
+   * carries `roleAdded` alongside the session.
+   */
   register(payload: { name: string; email: string; password: string; role: Role }) {
-    return this.call<Session>("/register", { method: "POST", body: payload });
+    return this.call<Session & { roleAdded?: boolean }>("/register", {
+      method: "POST",
+      body: payload,
+    });
   }
 
   /**
@@ -222,14 +231,32 @@ export class ApiClient {
     return this.call<{ bookings: Booking[] }>("/bookings", { token });
   }
 
+  /**
+   * Payment is part of creating a booking, so it defaults to a valid test
+   * card here: a spec arranging a booking row shouldn't have to care.
+   * Pass `payment` explicitly (including a deliberately bad one) to
+   * exercise the payment validation itself.
+   */
   createBooking(
     token: string,
-    payload: { spotId: number; hours: number; startAt?: string },
+    payload: {
+      spotId: number;
+      hours: number;
+      startAt?: string;
+      payment?: PaymentInput | Record<string, unknown> | null;
+    },
   ) {
+    const { payment, ...rest } = payload;
     return this.call<{ booking: Booking }>("/bookings", {
       method: "POST",
       token,
-      body: payload,
+      body: {
+        ...rest,
+        // `null` means "send no payment at all", which is how a spec
+        // asserts that booking without paying is refused. `undefined`
+        // means "I don't care", so pay cash, which needs no gateway receipt.
+        ...(payment === null ? {} : { payment: payment ?? { mode: "cash" } }),
+      },
     });
   }
 
@@ -246,6 +273,24 @@ export class ApiClient {
       method: "PATCH",
       token,
       body: { extendHours },
+    });
+  }
+
+  /* ─── booking pass (behind the QR code) ───────────────── */
+
+  /**
+   * Fetch a pass. `token` is optional on purpose: the endpoint answers
+   * without a session, and what comes back depends on who the caller
+   * turns out to be.
+   */
+  pass(passToken: string, token?: string) {
+    return this.call<{ pass: BookingPass }>(`/pass/${passToken}`, { token });
+  }
+
+  confirmArrival(passToken: string, token?: string) {
+    return this.call<{ pass: BookingPass }>(`/pass/${passToken}/arrival`, {
+      method: "POST",
+      token,
     });
   }
 
@@ -274,7 +319,7 @@ export class ApiClient {
     });
   }
 
-  /* ─── vehicles & cards ────────────────────────────────── */
+  /* ─── vehicles ────────────────────────────────────────── */
 
   vehicles(token: string) {
     return this.call<{ vehicles: Vehicle[] }>("/vehicles", { token });
@@ -290,25 +335,6 @@ export class ApiClient {
 
   deleteVehicle(token: string, id: number) {
     return this.call<{ ok: boolean }>(`/vehicles/${id}`, { method: "DELETE", token });
-  }
-
-  paymentMethods(token: string) {
-    return this.call<{ methods: PaymentMethod[] }>("/payment-methods", { token });
-  }
-
-  addPaymentMethod(token: string, payload: Record<string, unknown>) {
-    return this.call<{ method: PaymentMethod }>("/payment-methods", {
-      method: "POST",
-      token,
-      body: payload,
-    });
-  }
-
-  deletePaymentMethod(token: string, id: number) {
-    return this.call<{ ok: boolean }>(`/payment-methods/${id}`, {
-      method: "DELETE",
-      token,
-    });
   }
 
   /* ─── owner / admin ───────────────────────────────────── */

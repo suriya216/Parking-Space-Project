@@ -42,12 +42,34 @@ export class AuthPage extends BasePage {
   /**
    * Sign in and wait for the auth screen to go away.
    *
+   * If the account has multiple roles and the role choice prompt appears,
+   * the caller must specify which role to sign in as via the optional
+   * chosenRole parameter.
+   *
    * Does not assert which dashboard appeared — the role landing is the
    * caller's concern, and asserting it here would hide it from the spec.
    */
-  async signIn(user: Pick<TestUser, "email" | "password">): Promise<void> {
+  async signIn(user: Pick<TestUser, "email" | "password">, chosenRole?: "driver" | "owner"): Promise<void> {
+    /* If called right after registration, the form may still be showing the
+       "Account created" message. Clear it by clicking the submit button
+       or waiting for the form to settle, then fill fresh credentials. */
+    await this.el.email.waitFor({ state: "visible" });
+    /* Clear the name field if still visible from registration mode */
+    if (await this.el.name.isVisible().catch(() => false)) {
+      await this.el.name.clear();
+    }
+    /* Clear email and password from any previous state */
+    await this.el.email.clear();
+    await this.el.password.clear();
     await this.fillCredentials(user.email, user.password);
     await this.submit();
+    
+    /* If the account has multiple roles, a role choice prompt will appear
+       instead of immediate sign-in. If a role was specified, click it. */
+    if (chosenRole) {
+      await this.page.locator(`[data-testid="auth-role-choice-option"][data-role="${chosenRole}"]`).click();
+    }
+    
     await this.el.screen.waitFor({ state: "detached" });
   }
 
@@ -74,9 +96,13 @@ export class AuthPage extends BasePage {
     } else {
       await this.el.roleDriver.click();
     }
+    /* Ensure the name field is ready for input and clear any previous value */
+    await this.el.name.waitFor({ state: "visible" });
+    await this.el.name.clear();
     await this.el.name.fill(account.name);
     await this.el.email.fill(account.email);
     await this.el.password.fill(account.password);
+    await this.el.passwordConfirm.fill(account.password);
     await this.submit();
     /* Registering returns to the sign-in form, which clears the password
        field as it switches mode. Wait for that to land: a caller that
@@ -92,6 +118,7 @@ export class AuthPage extends BasePage {
     await this.el.name.fill(account.name);
     await this.el.email.fill(account.email);
     await this.el.password.fill(account.password);
+    await this.el.passwordConfirm.fill(account.password);
   }
 
   async openForgotPassword(): Promise<void> {

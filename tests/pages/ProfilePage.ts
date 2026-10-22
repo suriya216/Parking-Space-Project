@@ -1,7 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 
 import {
-  cardsLocators,
   editProfileLocators,
   profileLocators,
   safetyLocators,
@@ -16,7 +15,6 @@ export class ProfilePage extends BasePage {
   readonly el: ReturnType<typeof profileLocators>;
   readonly edit: ReturnType<typeof editProfileLocators>;
   readonly vehicles: ReturnType<typeof vehiclesLocators>;
-  readonly cards: ReturnType<typeof cardsLocators>;
   readonly settings: ReturnType<typeof settingsLocators>;
   readonly safety: ReturnType<typeof safetyLocators>;
 
@@ -25,7 +23,6 @@ export class ProfilePage extends BasePage {
     this.el = profileLocators(page);
     this.edit = editProfileLocators(page);
     this.vehicles = vehiclesLocators(page);
-    this.cards = cardsLocators(page);
     this.settings = settingsLocators(page);
     this.safety = safetyLocators(page);
   }
@@ -42,8 +39,8 @@ export class ProfilePage extends BasePage {
   /**
    * Wait out a sheet's initial fetch.
    *
-   * The vehicles and cards sheets render a "Loading…" line while their
-   * GET is in flight. Acting before it settles is how a spec ends up
+   * The vehicles sheet renders a "Loading…" line while its GET is in
+   * flight. Acting before it settles is how a spec ends up
    * racing the response — and under parallel workers that GET is slow
    * enough to matter.
    */
@@ -92,24 +89,6 @@ export class ProfilePage extends BasePage {
 
   async vehicleCount(): Promise<number> {
     return this.vehicles.rows.count();
-  }
-
-  /* ─── payment methods ─────────────────────────────────── */
-
-  async openPaymentMethods(): Promise<void> {
-    await this.openRow("Payment methods");
-    await this.cards.sheet.waitFor({ state: "visible" });
-    await this.waitForSheetLoad(this.cards.sheet);
-  }
-
-  async addCard(number: string, expiry: string): Promise<void> {
-    await this.cards.number.fill(number);
-    await this.cards.expiry.fill(expiry);
-    await this.cards.add.click();
-  }
-
-  async cardCount(): Promise<number> {
-    return this.cards.rows.count();
   }
 
   /* ─── settings ────────────────────────────────────────── */

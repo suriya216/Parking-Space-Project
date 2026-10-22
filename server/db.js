@@ -18,13 +18,20 @@ const db = new DatabaseSync(DB_PATH);
 
 db.exec(`
   PRAGMA journal_mode = WAL;
+  -- An account is identified by email AND role, not by email alone. One
+  -- person who both parks and rents out a space holds two accounts on the
+  -- same address, each with its own password — the same one or a different
+  -- one, whichever they choose. They are genuinely separate: separate
+  -- passwords, separate bookings, separate listings, separate profile.
   CREATE TABLE IF NOT EXISTS users (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT NOT NULL,
-    email      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    email      TEXT NOT NULL COLLATE NOCASE,
     pass_hash  TEXT NOT NULL,
     role       TEXT NOT NULL CHECK (role IN ('driver', 'owner', 'admin')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    upi_id     TEXT NOT NULL DEFAULT '',
+    UNIQUE (email, role)
   );
 
   CREATE TABLE IF NOT EXISTS spots (
@@ -43,6 +50,7 @@ db.exec(`
     owner      TEXT NOT NULL,
     available  TEXT NOT NULL,
     since      INTEGER NOT NULL,
+    accepted_payment_methods TEXT NOT NULL DEFAULT '["online","cash"]',
     UNIQUE (name, address)
   );
 
@@ -57,6 +65,8 @@ db.exec(`
     total      REAL NOT NULL,
     status     TEXT NOT NULL DEFAULT 'active'
                CHECK (status IN ('active', 'completed', 'cancelled')),
+    payment_status TEXT NOT NULL DEFAULT 'confirmed'
+               CHECK (payment_status IN ('confirmed', 'pending', 'failed')),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -85,17 +95,6 @@ db.exec(`
     label      TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
-
-  -- Card details are NEVER stored: only the brand, the last four digits
-  -- and the expiry, which is all the UI needs to render a saved card.
-  CREATE TABLE IF NOT EXISTS payment_methods (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    brand      TEXT NOT NULL,
-    last4      TEXT NOT NULL,
-    exp        TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
 `);
 
 // ─── MIGRATIONS ─────────────────────────────────────────
@@ -114,22 +113,116 @@ addColumnIfMissing("users", "phone", "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing("users", "provider", "TEXT NOT NULL DEFAULT 'local'");
 addColumnIfMissing("users", "provider_id", "TEXT");
 addColumnIfMissing("users", "avatar", "TEXT NOT NULL DEFAULT ''");
+// Owner's UPI id (VPA), where booking payouts are directed. Optional — an
+// owner who only takes cash, or hasn't set it up yet, leaves it blank.
+addColumnIfMissing("users", "upi_id", "TEXT NOT NULL DEFAULT ''");
+
+// Accounts used to be keyed on email alone, with several roles hanging off
+// the one row via a user_roles table. They are now keyed on (email, role),
+// so the UNIQUE constraint on email has to go — and in SQLite a column
+// constraint can only be removed by rebuilding the table.
+//
+// Detected by the implicit index SQLite creates for `email TEXT UNIQUE`,
+// which the (email, role) schema does not have, so this runs exactly once.
+const emailIsUniqueAlone = () =>
+  db
+    .prepare("PRAGMA index_list(users)")
+    .all()
+    .filter((i) => i.unique)
+    .some((i) => {
+      const cols = db.prepare(`PRAGMA index_info(${JSON.stringify(i.name)})`).all();
+      return cols.length === 1 && cols[0].name === "email";
+    });
+
+if (emailIsUniqueAlone()) {
+  // Foreign keys are still off at this point (they go on below), so the
+  // drop-and-rename does not cascade bookings, spots or favourites away.
+  // Ids carry over verbatim, so every child row still resolves.
+  db.exec(`
+    CREATE TABLE users_rebuild (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT NOT NULL,
+      email      TEXT NOT NULL COLLATE NOCASE,
+      pass_hash  TEXT NOT NULL,
+      role       TEXT NOT NULL CHECK (role IN ('driver', 'owner', 'admin')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      phone      TEXT NOT NULL DEFAULT '',
+      provider   TEXT NOT NULL DEFAULT 'local',
+      provider_id TEXT,
+      avatar     TEXT NOT NULL DEFAULT '',
+      UNIQUE (email, role)
+    );
+    INSERT INTO users_rebuild
+      (id, name, email, pass_hash, role, created_at, phone, provider, provider_id, avatar)
+    SELECT id, name, email, pass_hash, role, created_at, phone, provider, provider_id, avatar
+    FROM users;
+    DROP TABLE users;
+    ALTER TABLE users_rebuild RENAME TO users;
+  `);
+}
+
 db.exec(
   `CREATE UNIQUE INDEX IF NOT EXISTS users_provider_idx
    ON users(provider, provider_id) WHERE provider_id IS NOT NULL`
 );
+
 addColumnIfMissing("spots", "created_by", "INTEGER REFERENCES users(id)");
-// date/time were added to the CREATE TABLE above after some local
-// databases already had a bookings table without them; without this,
-// createBooking's INSERT fails with "no such column: date" on any db
-// created before that change.
-addColumnIfMissing("bookings", "date", "TEXT NOT NULL DEFAULT ''");
-addColumnIfMissing("bookings", "time", "TEXT NOT NULL DEFAULT ''");
+// JSON array of accepted payment methods: ["online", "cash"]
+addColumnIfMissing("spots", "accepted_payment_methods", "TEXT NOT NULL DEFAULT '[\"online\",\"cash\"]'");
 // ISO timestamp of when the slot starts. Needed so extending a booking can
 // recompute the end of the window rather than showing a vague "Nh from now".
 addColumnIfMissing("bookings", "start_at", "TEXT");
+// Payment status: confirmed (online payment), pending (cash), or failed
+addColumnIfMissing("bookings", "payment_status", "TEXT NOT NULL DEFAULT 'confirmed' CHECK (payment_status IN ('confirmed', 'pending', 'failed'))");
+// How the booking was paid for, as a display label only ("Visa ···· 4242",
+// "UPI asha@okhdfc"). Payment is taken at booking time and nothing
+// reusable is kept, so there is no saved-card table any more.
+addColumnIfMissing("bookings", "paid_via", "TEXT NOT NULL DEFAULT ''");
+// Unguessable handle for the booking's pass. The QR encodes THIS, never
+// the ref: refs are five digits, so a ref-keyed public lookup could be
+// enumerated in a few thousand requests.
+addColumnIfMissing("bookings", "pass_token", "TEXT");
+// Set when the spot's owner confirms the driver turned up and parked.
+addColumnIfMissing("bookings", "arrived_at", "TEXT");
+addColumnIfMissing("bookings", "arrived_by", "INTEGER REFERENCES users(id)");
+
+// The old multi-role table, from when one row could hold several roles.
+// Each extra role becomes its own account on the same email, carrying the
+// name and password hash it was granted under — otherwise somebody who had
+// signed up as both a driver and an owner would silently lose one of the
+// two. Bookings and listings stay with the original row, which keeps
+// whichever role it was last acting as.
+//
+// Runs before foreign keys go on, and before seeding, so the split rows are
+// in place by the time anything reads them.
+if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_roles'").get()) {
+  const extras = db
+    .prepare(
+      `SELECT u.name, u.email, u.pass_hash, u.phone, r.role
+       FROM user_roles r
+       JOIN users u ON u.id = r.user_id
+       WHERE r.role != u.role`
+    )
+    .all();
+
+  const insertSplit = db.prepare(
+    `INSERT OR IGNORE INTO users (name, email, pass_hash, role, phone)
+     VALUES (?, ?, ?, ?, ?)`
+  );
+  for (const e of extras) {
+    insertSplit.run(e.name, e.email, e.pass_hash, e.role, e.phone ?? "");
+  }
+
+  db.exec("DROP TABLE user_roles;");
+}
 
 db.exec("PRAGMA foreign_keys = ON;");
+
+// Saved cards are gone: payment is collected during booking and only a
+// display label survives on the booking row. Dropping the table keeps a
+// database created by an earlier version from holding card fragments
+// nothing can manage or delete any more.
+db.exec("DROP TABLE IF EXISTS payment_methods;");
 
 // ─── PASSWORD HASHING (scrypt, from node:crypto) ────────
 // Stored as "salt:hash", both hex. scrypt is a deliberately slow KDF,
@@ -166,12 +259,12 @@ const SEED_USERS = [
 // Real Chennai coordinates, so distances and map placement are genuine
 // rather than the percentage-based fake positions used before.
 const SEED_SPOTS = [
-  { name: "Lakshmi Residency", address: "14 Gandhi St, T. Nagar", type: "Covered", vehicle: "Sedan/SUV", price: 40, rating: 4.9, reviews: 247, verified: 1, lat: 13.0418, lng: 80.2341, photo: "/spots/covered-garage.svg", owner: "Lakshmi S.", available: "Mon–Sat, 8 AM – 8 PM", since: 2025 },
-  { name: "Kumar's driveway", address: "8 Lake View Rd, Nungambakkam", type: "Open", vehicle: "Sedan", price: 25, rating: 4.6, reviews: 89, verified: 0, lat: 13.0569, lng: 80.2425, photo: "/spots/open-driveway.svg", owner: "Arun K.", available: "Daily, 9 AM – 9 PM", since: 2026 },
-  { name: "Selva Complex parking", address: "22 Anna Salai, Teynampet", type: "Covered", vehicle: "All", price: 55, rating: 4.8, reviews: 412, verified: 1, lat: 13.0392, lng: 80.2489, photo: "/spots/basement-lot.svg", owner: "Selvaraj M.", available: "24/7", since: 2024 },
-  { name: "Priya's compound", address: "5 Cenotaph Rd, Alwarpet", type: "Open", vehicle: "Bike/Sedan", price: 20, rating: 4.3, reviews: 34, verified: 0, lat: 13.0339, lng: 80.2532, photo: "/spots/gated-compound.svg", owner: "Priya R.", available: "Mon–Fri, 7 AM – 7 PM", since: 2026 },
-  { name: "Rajan Towers", address: "18 TTK Rd, Mylapore", type: "Covered", vehicle: "SUV", price: 60, rating: 4.7, reviews: 178, verified: 1, lat: 13.0338, lng: 80.2619, photo: "/spots/basement-lot.svg", owner: "Rajan V.", available: "Daily, 6 AM – 11 PM", since: 2025 },
-  { name: "Green Park residence", address: "3 Bharathi St, Kodambakkam", type: "Open", vehicle: "Sedan/Bike", price: 15, rating: 4.1, reviews: 22, verified: 0, lat: 13.0510, lng: 80.2260, photo: "/spots/open-driveway.svg", owner: "Meera G.", available: "Weekdays only", since: 2026 },
+  { name: "Lakshmi Residency", address: "14 Gandhi St, T. Nagar", type: "Covered", vehicle: "Sedan/SUV", price: 40, rating: 4.9, reviews: 247, verified: 1, lat: 13.0418, lng: 80.2341, photo: "/spots/covered-garage.svg", owner: "Lakshmi S.", available: "Mon–Sat, 8 AM – 8 PM", since: 2025, acceptedPaymentMethods: '["online","cash"]' },
+  { name: "Kumar's driveway", address: "8 Lake View Rd, Nungambakkam", type: "Open", vehicle: "Sedan", price: 25, rating: 4.6, reviews: 89, verified: 0, lat: 13.0569, lng: 80.2425, photo: "/spots/open-driveway.svg", owner: "Arun K.", available: "Daily, 9 AM – 9 PM", since: 2026, acceptedPaymentMethods: '["online","cash"]' },
+  { name: "Selva Complex parking", address: "22 Anna Salai, Teynampet", type: "Covered", vehicle: "All", price: 55, rating: 4.8, reviews: 412, verified: 1, lat: 13.0392, lng: 80.2489, photo: "/spots/basement-lot.svg", owner: "Selvaraj M.", available: "24/7", since: 2024, acceptedPaymentMethods: '["online"]' },
+  { name: "Priya's compound", address: "5 Cenotaph Rd, Alwarpet", type: "Open", vehicle: "Bike/Sedan", price: 20, rating: 4.3, reviews: 34, verified: 0, lat: 13.0339, lng: 80.2532, photo: "/spots/gated-compound.svg", owner: "Priya R.", available: "Mon–Fri, 7 AM – 7 PM", since: 2026, acceptedPaymentMethods: '["cash"]' },
+  { name: "Rajan Towers", address: "18 TTK Rd, Mylapore", type: "Covered", vehicle: "SUV", price: 60, rating: 4.7, reviews: 178, verified: 1, lat: 13.0338, lng: 80.2619, photo: "/spots/basement-lot.svg", owner: "Rajan V.", available: "Daily, 6 AM – 11 PM", since: 2025, acceptedPaymentMethods: '["online"]' },
+  { name: "Green Park residence", address: "3 Bharathi St, Kodambakkam", type: "Open", vehicle: "Sedan/Bike", price: 15, rating: 4.1, reviews: 22, verified: 0, lat: 13.0510, lng: 80.2260, photo: "/spots/open-driveway.svg", owner: "Meera G.", available: "Weekdays only", since: 2026, acceptedPaymentMethods: '["online","cash"]' },
 ];
 
 // Fallback map centre when the browser won't share a location: central
@@ -181,26 +274,28 @@ export const DEFAULT_CENTER = { lat: 13.0435, lng: 80.2425 };
 export const seed = () => {
   const insertUser = db.prepare(
     `INSERT INTO users (name, email, pass_hash, role)
-     SELECT ?, ?, ?, ?
-     WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = ? COLLATE NOCASE)`
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT (email, role) DO NOTHING`
   );
   let users = 0;
   for (const u of SEED_USERS) {
-    users += insertUser.run(u.name, u.email, hashPassword(u.password), u.role, u.email).changes;
+    // DO NOTHING rather than an update: an existing seed account keeps
+    // whatever password it has now, so restarts don't undo a change.
+    users += insertUser.run(u.name, u.email, hashPassword(u.password), u.role).changes;
   }
 
   // ON CONFLICT against the (name, address) unique key keeps seeding
   // idempotent across restarts.
   const insertSpot = db.prepare(
     `INSERT INTO spots (name, address, type, vehicle, price, rating, reviews,
-                        verified, lat, lng, photo, owner, available, since)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        verified, lat, lng, photo, owner, available, since, accepted_payment_methods)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (name, address) DO NOTHING`
   );
   let spots = 0;
   for (const s of SEED_SPOTS) {
     spots += insertSpot.run(s.name, s.address, s.type, s.vehicle, s.price, s.rating,
-      s.reviews, s.verified, s.lat, s.lng, s.photo, s.owner, s.available, s.since).changes;
+      s.reviews, s.verified, s.lat, s.lng, s.photo, s.owner, s.available, s.since, s.acceptedPaymentMethods).changes;
   }
 
   // Link seeded spots to the seeded owner account by matching display name,
@@ -221,20 +316,20 @@ export const seed = () => {
 
   if (driver && existing === 0) {
     const insertBooking = db.prepare(
-      `INSERT INTO bookings (user_id, spot_id, ref, date, time, hours, total, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO bookings (user_id, spot_id, ref, date, time, hours, total, status, paid_via)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const byName = (n) => db.prepare("SELECT * FROM spots WHERE name = ?").get(n);
     const seedBookings = [
-      { spot: "Lakshmi Residency", ref: "PS-78421", date: "7 Sep 2026", time: "10:00 AM – 2:00 PM", hours: 4, status: "active" },
-      { spot: "Selva Complex parking", ref: "PS-78390", date: "6 Sep 2026", time: "1:00 PM – 5:00 PM", hours: 4, status: "completed" },
-      { spot: "Lakshmi Residency", ref: "PS-78355", date: "5 Sep 2026", time: "9:00 AM – 12:00 PM", hours: 3, status: "completed" },
+      { spot: "Lakshmi Residency", ref: "PS-78421", date: "7 Sep 2026", time: "10:00 AM – 2:00 PM", hours: 4, status: "active", paidVia: "Visa ···· 4242" },
+      { spot: "Selva Complex parking", ref: "PS-78390", date: "6 Sep 2026", time: "1:00 PM – 5:00 PM", hours: 4, status: "completed", paidVia: "UPI rajesh@okaxis" },
+      { spot: "Lakshmi Residency", ref: "PS-78355", date: "5 Sep 2026", time: "9:00 AM – 12:00 PM", hours: 3, status: "completed", paidVia: "Visa ···· 4242" },
     ];
     for (const b of seedBookings) {
       const spot = byName(b.spot);
       if (!spot) continue;
       bookings += insertBooking.run(driver.id, spot.id, b.ref, b.date, b.time, b.hours,
-        Math.round(spot.price * b.hours * 1.1), b.status).changes;
+        Math.round(spot.price * b.hours * 1.1), b.status, b.paidVia).changes;
     }
 
     // One favourite so the Saved tab isn't empty on first run.
@@ -247,7 +342,13 @@ export const seed = () => {
       .run(driver.id, "Hyundai i20", "TN 09 BX 4412", "Sedan");
   }
 
-  return { users, spots, bookings };
+  // Seeded rows are inserted without a pass token, and a database from an
+  // earlier version has none at all; give every booking one so its QR
+  // resolves. Defined further down the module, which is fine: seed() only
+  // ever runs after the module has finished evaluating.
+  const passTokens = backfillPassTokens();
+
+  return { users, spots, bookings, passTokens };
 };
 
 // ─── SPOTS ──────────────────────────────────────────────
@@ -311,7 +412,8 @@ export const deleteSpot = (id) =>
 // has to join the two lists itself.
 const BOOKING_SELECT = `
   SELECT b.id, b.ref, b.date, b.time, b.hours, b.total, b.status, b.created_at,
-         b.user_id, b.spot_id, u.name AS user_name, u.email AS user_email
+         b.user_id, b.spot_id, b.paid_via, b.payment_status, b.pass_token, b.arrived_at,
+         b.arrived_by, u.name AS user_name, u.email AS user_email
   FROM bookings b
   JOIN users u ON u.id = b.user_id
 `;
@@ -344,6 +446,20 @@ export const listBookingsForUser = (user) => {
 
 const newRef = () => `PS-${Math.floor(10000 + Math.random() * 90000)}`;
 
+// 128 bits of randomness, hex. The pass endpoint is reachable without a
+// session — holding the token IS the proof you were shown the code — so it
+// has to be unguessable in a way the five-digit ref is not.
+const newPassToken = () => randomBytes(16).toString("hex");
+
+// Bookings created before pass_token existed (and the seeded rows) need one
+// too, otherwise their QR has nothing to point at.
+export const backfillPassTokens = () => {
+  const rows = db.prepare("SELECT id FROM bookings WHERE pass_token IS NULL").all();
+  const set = db.prepare("UPDATE bookings SET pass_token = ? WHERE id = ?");
+  for (const r of rows) set.run(newPassToken(), r.id);
+  return rows.length;
+};
+
 // Display helpers. Times are rendered in India Standard Time because the
 // listings are all Chennai and the server may run in any zone.
 const IST = "Asia/Kolkata";
@@ -364,7 +480,7 @@ const windowLabel = (startISO, hours) => {
   return `${fmtClock(start)} – ${fmtClock(end)}`;
 };
 
-export const createBooking = ({ userId, spotId, hours, startAt }) => {
+export const createBooking = ({ userId, spotId, hours, startAt, paidVia = "", paymentStatus = "confirmed" }) => {
   const spot = findSpot(spotId);
   if (!spot) return null;
   // Price is recomputed from the stored spot price rather than trusted
@@ -379,10 +495,27 @@ export const createBooking = ({ userId, spotId, hours, startAt }) => {
   while (db.prepare("SELECT 1 FROM bookings WHERE ref = ?").get(ref)) ref = newRef();
 
   const info = db.prepare(
-    `INSERT INTO bookings (user_id, spot_id, ref, date, time, hours, total, start_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(userId, spotId, ref, fmtDay(start), windowLabel(startISO, hours), hours, total, startISO);
+    `INSERT INTO bookings
+       (user_id, spot_id, ref, date, time, hours, total, start_at, paid_via, pass_token, payment_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(userId, spotId, ref, fmtDay(start), windowLabel(startISO, hours), hours, total,
+        startISO, paidVia, newPassToken(), paymentStatus);
   return findBooking(info.lastInsertRowid);
+};
+
+/** Lookup behind the QR code. Keyed on the pass token, never the ref. */
+export const findBookingByPassToken = (token) =>
+  hydrateBooking(db.prepare(`${BOOKING_SELECT} WHERE b.pass_token = ?`).get(token));
+
+/**
+ * Records that the owner saw the car in the space. Idempotent: a second
+ * scan keeps the first timestamp rather than quietly moving arrival later.
+ */
+export const markBookingArrived = (id, byUserId) => {
+  db.prepare(
+    "UPDATE bookings SET arrived_at = datetime('now'), arrived_by = ? WHERE id = ? AND arrived_at IS NULL"
+  ).run(byUserId, id);
+  return findBooking(id);
 };
 
 export const setBookingStatus = (id, status) => {
@@ -467,24 +600,19 @@ export const deleteSpotPhoto = (userId, id) => {
   return row;
 };
 
-// ─── PAYMENT METHODS ────────────────────────────────────
-export const listPaymentMethods = (userId) =>
-  db.prepare("SELECT * FROM payment_methods WHERE user_id = ? ORDER BY id").all(userId);
-
-export const addPaymentMethod = (userId, { brand, last4, exp }) => {
-  const info = db.prepare(
-    "INSERT INTO payment_methods (user_id, brand, last4, exp) VALUES (?, ?, ?, ?)"
-  ).run(userId, brand, last4, exp);
-  return db.prepare("SELECT * FROM payment_methods WHERE id = ?").get(info.lastInsertRowid);
-};
-
-export const deletePaymentMethod = (userId, id) =>
-  db.prepare("DELETE FROM payment_methods WHERE id = ? AND user_id = ?")
-    .run(id, userId).changes;
-
 // ─── USERS ──────────────────────────────────────────────
 // `pass_hash` is never selected into anything the API can return.
-const PUBLIC_COLS = "id, name, email, phone, role, provider, avatar, created_at";
+const PUBLIC_COLS = "id, name, email, phone, role, provider, avatar, upi_id, created_at";
+
+// ─── ROLES ──────────────────────────────────────────────
+// An account holds exactly one role, fixed when it is created. Somebody
+// who both parks and rents out a space keeps two accounts on the same
+// email — see the note on the users table.
+//
+// `roles` still travels to the client as a one-element list rather than
+// being dropped: the admin screen and the Session type read a list, and a
+// single shape is easier to reason about than two.
+const withRoles = (user) => (user ? { ...user, roles: [user.role] } : user);
 
 // ─── OAUTH IDENTITIES ───────────────────────────────────
 export const findByProvider = (provider, providerId) =>
@@ -508,15 +636,21 @@ export const upsertOAuthUser = ({ provider, providerId, email, name, avatar, ema
     return { user: findUser(existing.id), created: false, linked: false };
   }
 
-  const clash = email ? findByEmail(email) : null;
+  // Provider sign-in lands on the DRIVER account for the address: that is
+  // the role an account created here gets. An owner account on the same
+  // email is a different account, and is left alone rather than claimed.
+  const onAddress = email ? findAccountsByEmail(email) : [];
+
+  // An unverified address must not touch ANY account on it, in any role:
+  // anyone can set an unverified email at the provider, and creating a
+  // driver account there would squat an address that belongs to someone else.
+  if (onAddress.length > 0 && !emailVerified) {
+    return { conflict: "unverified-email" };
+  }
+
+  const clash = email ? findAccount(email, "driver") : null;
 
   if (clash) {
-    if (!emailVerified) {
-      // Refuse rather than link: anyone who can set an unverified email at
-      // the provider could otherwise take over this local account. Also
-      // refuse rather than insert, since email is UNIQUE.
-      return { conflict: "unverified-email" };
-    }
     db.prepare("UPDATE users SET provider = ?, provider_id = ?, avatar = ? WHERE id = ?")
       .run(provider, providerId, avatar ?? "", clash.id);
     return { user: findUser(clash.id), created: false, linked: true };
@@ -546,27 +680,50 @@ export const upsertOAuthUser = ({ provider, providerId, email, name, avatar, ema
   };
 };
 
-export const findByEmail = (email) =>
-  db.prepare("SELECT * FROM users WHERE email = ? COLLATE NOCASE").get(email);
+/**
+ * The one account on this address acting in this role, or undefined.
+ * Includes pass_hash, so this is for the auth layer only.
+ */
+export const findAccount = (email, role) =>
+  db.prepare("SELECT * FROM users WHERE email = ? COLLATE NOCASE AND role = ?")
+    .get(email, role);
+
+/** Every account registered on an address — at most one per role. */
+export const findAccountsByEmail = (email) =>
+  db.prepare(`SELECT ${PUBLIC_COLS} FROM users WHERE email = ? COLLATE NOCASE ORDER BY role`)
+    .all(email)
+    .map(withRoles);
 
 export const findUser = (id) =>
-  db.prepare(`SELECT ${PUBLIC_COLS} FROM users WHERE id = ?`).get(id);
+  withRoles(db.prepare(`SELECT ${PUBLIC_COLS} FROM users WHERE id = ?`).get(id));
 
 // Includes pass_hash, for the auth layer only. Callers must strip it
 // before anything reaches a response body.
 export const findUserWithHash = (id) =>
   db.prepare("SELECT * FROM users WHERE id = ?").get(id);
 
-export const updateUserProfile = (id, { name, email, phone }) => {
-  db.prepare("UPDATE users SET name = ?, email = ?, phone = ? WHERE id = ?")
-    .run(name, email, phone, id);
+export const updateUserProfile = (id, { name, email, phone, upiId }) => {
+  db.prepare("UPDATE users SET name = ?, email = ?, phone = ?, upi_id = ? WHERE id = ?")
+    .run(name, email, phone, upiId ?? "", id);
   // Spot rows carry a denormalised owner display name; keep it in step so
   // an owner renaming themselves doesn't orphan their listings.
   db.prepare("UPDATE spots SET owner = ? WHERE created_by = ?").run(name, id);
   return findUser(id);
 };
 
+/**
+ * Admin action: move an account to a different role.
+ *
+ * Returns null when this address already has an account in the target
+ * role, because (email, role) is unique — the two would have to be merged,
+ * and folding one account's bookings into another's is not something a
+ * role dropdown should decide to do.
+ */
 export const setUserRole = (id, role) => {
+  const target = db.prepare("SELECT email FROM users WHERE id = ?").get(id);
+  if (!target) return null;
+  const taken = findAccount(target.email, role);
+  if (taken && taken.id !== id) return null;
   db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, id);
   return findUser(id);
 };
@@ -583,7 +740,7 @@ export const changePassword = (id, password) => {
 };
 
 export const listUsers = () =>
-  db.prepare(`SELECT ${PUBLIC_COLS} FROM users ORDER BY id`).all();
+  db.prepare(`SELECT ${PUBLIC_COLS} FROM users ORDER BY id`).all().map(withRoles);
 
 export const countUsers = () =>
   db.prepare("SELECT role, COUNT(*) AS n FROM users GROUP BY role").all();
@@ -592,16 +749,48 @@ export const createUser = ({ name, email, password, role }) => {
   const info = db
     .prepare("INSERT INTO users (name, email, pass_hash, role) VALUES (?, ?, ?, ?)")
     .run(name, email, hashPassword(password), role);
-  return db
-    .prepare(`SELECT ${PUBLIC_COLS} FROM users WHERE id = ?`)
-    .get(info.lastInsertRowid);
+  return findUser(info.lastInsertRowid);
 };
 
-export const authenticate = (email, password) => {
-  const row = findByEmail(email);
-  if (!row || !verifyPassword(password, row.pass_hash)) return null;
+const stripHash = (row) => {
   const { pass_hash: _omit, ...safe } = row;
-  return safe;
+  return withRoles(safe);
+};
+
+/**
+ * Check a password against the account for this address AND role.
+ *
+ * The role is part of the identity, so a driver password will not open the
+ * owner account on the same address even though the email is identical.
+ */
+export const authenticate = (email, password, role) => {
+  const row = findAccount(email, role);
+  if (!row || !verifyPassword(password, row.pass_hash)) return null;
+  return stripHash(row);
+};
+
+/**
+ * Every account on this address whose password is `password`.
+ *
+ * Sign-in does not make people pick a role up front. Usually only one of
+ * the accounts on an address has the password being offered, so the role
+ * is implied and there is nothing to ask. It returns a list because that
+ * need not hold — somebody who chose the same password for their driver
+ * and owner accounts matches both, and only then must the caller ask which
+ * one was meant.
+ */
+export const authenticateAny = (email, password) =>
+  db
+    .prepare("SELECT * FROM users WHERE email = ? COLLATE NOCASE ORDER BY role")
+    .all(email)
+    .filter((row) => verifyPassword(password, row.pass_hash))
+    .map(stripHash);
+
+/** Re-check the signed-in account's own password, by id. */
+export const authenticateById = (id, password) => {
+  const row = findUserWithHash(id);
+  if (!row || !verifyPassword(password, row.pass_hash)) return null;
+  return stripHash(row);
 };
 
 export { SEED_USERS };

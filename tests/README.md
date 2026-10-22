@@ -49,7 +49,7 @@ tests/
     users.fixture.ts test accounts + negative-path credentials
     api.fixture.ts   typed API client over Playwright's request context
     auth.fixture.ts  session injection, role sign-in
-    data.fixture.ts  unique-per-run spots, vehicles, cards, coordinates
+    data.fixture.ts  unique-per-run spots, vehicles, test cards/UPI ids, coordinates
   locators/          element NAMES only, one module per area
   pages/             behaviour; page objects consume locators
   support/

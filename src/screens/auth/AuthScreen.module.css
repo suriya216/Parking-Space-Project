@@ -105,7 +105,13 @@
 .roleRow {
   display: flex;
   gap: 10px;
-  margin-bottom: 20px;
+  margin-bottom: 8px;
+}
+
+.roleHint {
+  font-size: 11px;
+  color: var(--ps-text-tertiary);
+  margin-bottom: 16px;
 }
 
 .roleButton {

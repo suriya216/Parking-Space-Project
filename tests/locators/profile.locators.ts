@@ -1,6 +1,11 @@
 /**
- * Profile screen and the sheets it opens (edit profile, vehicles, payment
- * methods, settings, safety & privacy).
+ * Profile screen and the sheets it opens (edit profile, vehicles,
+ * settings, safety & privacy).
+ *
+ * There is deliberately no payment-methods sheet here: cards are not
+ * saved, so Profile has nothing to manage. Payment is collected in the
+ * booking confirm sheet — see `confirmBookingLocators` in
+ * driver.locators.ts.
  */
 
 import type { Page } from "@playwright/test";
@@ -42,17 +47,6 @@ export const vehiclesLocators = (page: Page) => ({
   empty: page.getByTestId(TID.vehiclesEmpty),
 });
 
-export const cardsLocators = (page: Page) => ({
-  sheet: page.getByTestId(TID.cardsSheet),
-  rows: page.getByTestId(TID.cardRow),
-  rowById: (id: number) => recordLocator(page, TID.cardRow, RECORD_ATTR.card, id),
-  number: page.getByTestId(TID.cardNumber),
-  expiry: page.getByTestId(TID.cardExpiry),
-  add: page.getByTestId(TID.cardAdd),
-  deleteButtons: page.getByTestId(TID.cardDelete),
-  error: page.getByTestId(TID.cardError),
-});
-
 export const settingsLocators = (page: Page) => ({
   sheet: page.getByTestId(TID.settingsSheet),
   units: page.getByTestId(TID.settingsUnits),
@@ -70,6 +64,5 @@ export const safetyLocators = (page: Page) => ({
 export type ProfileLocators = ReturnType<typeof profileLocators>;
 export type EditProfileLocators = ReturnType<typeof editProfileLocators>;
 export type VehiclesLocators = ReturnType<typeof vehiclesLocators>;
-export type CardsLocators = ReturnType<typeof cardsLocators>;
 export type SettingsLocators = ReturnType<typeof settingsLocators>;
 export type SafetyLocators = ReturnType<typeof safetyLocators>;

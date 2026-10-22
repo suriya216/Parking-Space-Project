@@ -10,7 +10,7 @@ import { BasePage } from "./BasePage";
 
 /**
  * Spot detail plus the booking flow it leads into: detail → confirm sheet
- * → confirmation screen with QR.
+ * (which is where payment is taken) → confirmation screen with QR.
  */
 export class SpotDetailPage extends BasePage {
   readonly el: ReturnType<typeof spotDetailLocators>;
@@ -64,9 +64,32 @@ export class SpotDetailPage extends BasePage {
     await this.confirmSheet.sheet.waitFor({ state: "visible" });
   }
 
-  async confirmBooking(): Promise<void> {
+  /* ─── payment, taken inside the confirm sheet ─────────── */
+
+  /** Pay through the gateway (the demo gateway completes it on submit). */
+  async payOnline(): Promise<void> {
+    await this.confirmSheet.payOnline.click();
+  }
+
+  /** Reserve now and pay the owner in cash; the booking stays pending. */
+  async payCash(): Promise<void> {
+    await this.confirmSheet.payCash.click();
+  }
+
+  /**
+   * Submit the confirm sheet. Payment is now part of booking, so this
+   * picks online payment first unless the caller already chose how to pay —
+   * a spec that only cares about the booking shouldn't have to.
+   */
+  async confirmBooking({ pay = true }: { pay?: boolean } = {}): Promise<void> {
+    if (pay) await this.payOnline();
     await this.confirmSheet.submit.click();
     await this.confirmed.screen.waitFor({ state: "visible" });
+  }
+
+  /** Submit without waiting for success — for the rejection paths. */
+  async submitPayment(): Promise<void> {
+    await this.confirmSheet.submit.click();
   }
 
   async abandonBooking(): Promise<void> {
@@ -74,7 +97,7 @@ export class SpotDetailPage extends BasePage {
     await this.confirmSheet.sheet.waitFor({ state: "detached" });
   }
 
-  /** Detail → confirmed, returning the booking reference shown. */
+  /** Detail → paid → confirmed, returning the booking reference shown. */
   async bookFor(hours: number): Promise<string> {
     await this.setHours(hours);
     await this.startBooking();

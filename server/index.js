@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import * as apple from "./apple.js";
 import * as db from "./db.js";
 import * as oauth from "./oauth.js";
+import * as payments from "./payments.js";
 import * as session from "./session.js";
 
 const app = express();
@@ -206,22 +207,53 @@ const asId = (v) => {
 };
 
 // ─── AUTH ───────────────────────────────────────────────
-const publicUser = ({ id, name, email, phone, role, provider, avatar, created_at }) =>
-  ({ id, name, email, phone: phone ?? "", role, provider: provider ?? "local", avatar: avatar ?? "", created_at });
+const publicUser = ({ id, name, email, phone, role, roles, provider, avatar, upi_id, created_at }) =>
+  ({
+    id, name, email, phone: phone ?? "", role,
+    // An account holds exactly one role, so this is always that one role.
+    // Kept as a list because the client and the Session type read a list.
+    roles: roles ?? [role],
+    provider: provider ?? "local", avatar: avatar ?? "", upi_id: upi_id ?? "", created_at,
+  });
 
 app.post("/api/login", rateLimitAuth, handler((req, res) => {
-  const { email, password } = req.body ?? {};
+  const { email, password, role } = req.body ?? {};
   if (!email || !password) {
     return res.status(400).json({ error: "Email and password are required." });
   }
-  const user = db.authenticate(email, password);
+  if (role != null && !["driver", "owner", "admin"].includes(role)) {
+    return res.status(400).json({ error: "Role must be driver, owner or admin." });
+  }
+
+  // An address may carry one account per role. The password normally picks
+  // out which of them is being signed in to, so the form does not have to
+  // ask for a role up front — `role` arrives only on the second attempt,
+  // after an ambiguous first one.
+  const matches = role
+    ? [db.authenticate(email, password, role)].filter(Boolean)
+    : db.authenticateAny(email, password);
+
   // Deliberately vague: saying "no such account" would let anyone
   // enumerate which emails are registered.
-  if (!user) {
+  if (matches.length === 0) {
     noteAuthFailure(req);
     return res.status(401).json({ error: "Invalid email or password." });
   }
   clearAuthFailures(req);
+
+  // The same password opens more than one of this address's accounts. It
+  // has already checked out, so naming the roles reveals nothing the
+  // caller could not already discover — but which account to open is
+  // theirs to say rather than ours to guess.
+  //
+  // A 200 with no token, not an error status: the request was answered,
+  // and "here are your accounts, pick one" is a step in signing in rather
+  // than a failure. The client re-posts with `role` set.
+  if (matches.length > 1) {
+    return res.json({ chooseRole: matches.map((u) => u.role) });
+  }
+
+  const [user] = matches;
   res.json({ user: publicUser(user), token: tokenFor(user) });
 }));
 
@@ -238,8 +270,20 @@ app.post("/api/register", rateLimitAuth, handler((req, res) => {
     // privilege-escalation hole.
     return res.status(400).json({ error: "Role must be driver or owner." });
   }
-  if (db.findByEmail(email)) {
-    return res.status(409).json({ error: "That email is already registered." });
+  // An address already in use for the OTHER role is not a dead end: this
+  // creates a second, independent account on the same email, so one person
+  // can both park and rent out a space. It is a new account rather than a
+  // role bolted onto an existing one, so it sets its own password and the
+  // other account's password is neither required nor touched.
+  //
+  // The trade-off, accepted deliberately: because no existing password has
+  // to be proved, anyone can occupy the unused role on someone else's
+  // address. They gain no access to the other account or its data, but
+  // they do take the slot.
+  if (db.findAccount(email, role)) {
+    return res.status(409).json({
+      error: `That email already has a ${role} account. Sign in instead.`,
+    });
   }
   const user = db.createUser({ name, email, password, role });
   res.status(201).json({ user: publicUser(user), token: tokenFor(user) });
@@ -396,15 +440,23 @@ app.get("/api/me", requireUser, handler((req, res) => {
 }));
 
 app.patch("/api/me", requireUser, handler((req, res) => {
-  const { name, email, phone } = req.body ?? {};
+  const { name, email, phone, upiId } = req.body ?? {};
   if (!name || !email) {
     return res.status(400).json({ error: "Name and email are required." });
   }
-  const clash = db.findByEmail(email);
+  // UPI id is optional, but if given it must be well-formed — a payout to a
+  // malformed VPA would silently fail later.
+  const upi = String(upiId ?? "").trim();
+  if (upi && !UPI_ID.test(upi)) {
+    return res.status(400).json({ error: "That doesn't look like a UPI id. Use the name@bank form." });
+  }
+  // Only a clash in the SAME role blocks the change: another role's
+  // account on that address is a separate account and may coexist.
+  const clash = db.findAccount(email, req.user.role);
   if (clash && clash.id !== req.user.id) {
     return res.status(409).json({ error: "That email is already in use." });
   }
-  const user = db.updateUserProfile(req.user.id, { name, email, phone: phone ?? "" });
+  const user = db.updateUserProfile(req.user.id, { name, email, phone: phone ?? "", upiId: upi });
   // The token embeds the email, so changing it invalidates the old one.
   res.json({ user: publicUser(user), token: tokenFor(user) });
 }));
@@ -424,7 +476,9 @@ app.post("/api/me/password", requireUser, handler((req, res) => {
       error: `This account signs in with ${req.user.provider}, so it has no password to change.`,
     });
   }
-  if (!db.authenticate(req.user.email, currentPassword)) {
+  // By id, not by email: an address can carry more than one account and
+  // only this one's password is being changed.
+  if (!db.authenticateById(req.user.id, currentPassword)) {
     noteAuthFailure(req);
     return res.status(403).json({ error: "Current password is incorrect." });
   }
@@ -539,13 +593,100 @@ app.delete("/api/spots/:id", requireRole("owner", "admin"), handler((req, res) =
   res.json({ ok: true, deleted: id });
 }));
 
+// ─── BOOKING PAYMENT ────────────────────────────────────
+// Online payments run through the gateway (see payments.js): the client
+// completes payment, then hands back the gateway's signed receipt, which is
+// verified server-side before a booking is confirmed. Cash is recorded
+// pending. Nothing reusable — no card number, no UPI credential — is ever
+// stored; only a short display label survives on the booking row.
+
+// A UPI id, e.g. "asha@okhdfc". Deliberately loose on the handle and
+// strict on the shape: the list of PSP suffixes changes constantly, so
+// validating against one would reject valid ids a month from now.
+const UPI_ID = /^[a-zA-Z0-9](?:[a-zA-Z0-9._-]{1,48}[a-zA-Z0-9])?@[a-zA-Z][a-zA-Z0-9]{1,29}$/;
+
+/**
+ * Validates the payment half of a booking request.
+ *
+ * Online payments (card/UPI/netbanking) go through the gateway: the client
+ * sends back the order id, the gateway's payment id and its signature, and
+ * this verifies that signature. A verified signature is proof the money
+ * moved — it cannot be forged without the gateway secret — so only then is
+ * the booking marked confirmed. Cash is recorded pending for the owner to
+ * confirm on receipt.
+ *
+ * @param {object} payment The client's payment object.
+ * @param {number} expectedPaise Server-computed amount, to reject tampering.
+ * @returns {{ label: string, status: string } | { error: string }}
+ */
+const takePayment = (payment, expectedPaise) => {
+  const { mode } = payment ?? {};
+
+  if (mode === "cash") {
+    return { label: "Cash", status: "pending" };
+  }
+
+  if (mode === "online") {
+    const { orderId, paymentId, signature, method, amount } = payment ?? {};
+    if (!payments.verifyPayment({ orderId, paymentId, signature })) {
+      return { error: "Payment could not be verified. You have not been charged." };
+    }
+    // The amount echoed back must match what the server billed, so a
+    // verified small-amount order can't be replayed against a big booking.
+    if (Number(amount) !== expectedPaise) {
+      return { error: "Payment amount did not match the booking." };
+    }
+    const label = method === "upi" ? "UPI" : method === "card" ? "Card" : "Online";
+    return { label: `${label} · ${paymentId}`, status: "confirmed" };
+  }
+
+  return { error: "Choose how you'd like to pay." };
+};
+
+// ─── PAYMENTS ───────────────────────────────────────────
+// Step 1 of an online payment: the client asks the server to open an order
+// for a specific booking. The amount is computed here from the spot's price
+// and never trusted from the client, so the sum the gateway charges is the
+// sum the server intends to bill.
+app.post("/api/payments/order", requireUser, handler(async (req, res) => {
+  const { spotId, hours } = req.body ?? {};
+  const sid = asId(spotId);
+  const h = Number(hours);
+  if (!sid) return res.status(400).json({ error: "A valid spotId is required." });
+  if (!Number.isInteger(h) || h < 1 || h > 24) {
+    return res.status(400).json({ error: "Hours must be a whole number from 1 to 24." });
+  }
+  const spot = db.findSpot(sid);
+  if (!spot) return res.status(404).json({ error: "Spot not found." });
+
+  const amountPaise = Math.round(spot.price * h * 1.1) * 100;
+  const order = await payments.createOrder(amountPaise, `spot${sid}-${Date.now()}`);
+  // The owner's UPI id (if they set one) rides along so the client can show
+  // "paying <owner>" and, in a real deployment, route the payout.
+  const owner = spot.created_by ? db.findUser(spot.created_by) : null;
+  res.json({ ...order, ownerUpi: owner?.upi_id || "" });
+}));
+
+// Step 2, DEMO ONLY: stands in for the user completing payment in their UPI
+// app. Returns a valid payment id + signature the client then submits with
+// the booking, exactly as Razorpay Checkout would in production. Refused
+// when real gateway keys are configured.
+app.post("/api/payments/demo-complete", requireUser, handler((req, res) => {
+  if (payments.GATEWAY_LIVE) {
+    return res.status(404).json({ error: "Not available." });
+  }
+  const { orderId } = req.body ?? {};
+  if (!orderId) return res.status(400).json({ error: "orderId is required." });
+  res.json(payments.demoComplete(String(orderId)));
+}));
+
 // ─── BOOKINGS ───────────────────────────────────────────
 app.get("/api/bookings", requireUser, handler((req, res) => {
   res.json({ bookings: db.listBookingsForUser(req.user) });
 }));
 
 app.post("/api/bookings", requireUser, handler((req, res) => {
-  const { spotId, hours, startAt } = req.body ?? {};
+  const { spotId, hours, startAt, payment } = req.body ?? {};
   const sid = asId(spotId);
   const h = Number(hours);
 
@@ -562,7 +703,17 @@ app.post("/api/bookings", requireUser, handler((req, res) => {
     return res.status(400).json({ error: "startAt must be a valid date." });
   }
 
-  const booking = db.createBooking({ userId: req.user.id, spotId: sid, hours: h, startAt });
+  // Payment is checked before the row is written, so a rejected card never
+  // leaves a booking behind. The amount is recomputed here, never trusted
+  // from the client, and the gateway signature is verified against it.
+  const spot = db.findSpot(sid);
+  const expectedPaise = Math.round(spot.price * h * 1.1) * 100;
+  const paid = takePayment(payment, expectedPaise);
+  if (paid.error) return res.status(400).json({ error: paid.error });
+
+  const booking = db.createBooking({
+    userId: req.user.id, spotId: sid, hours: h, startAt, paidVia: paid.label, paymentStatus: paid.status,
+  });
   res.status(201).json({ booking });
 }));
 
@@ -609,6 +760,89 @@ app.patch("/api/bookings/:id", requireUser, handler((req, res) => {
   res.status(400).json({ error: "Provide either status or extendHours." });
 }));
 
+// ─── BOOKING PASS (what the QR code opens) ──────────────
+// Deliberately reachable without a session: the point of the code is that
+// whoever is standing at the space can scan it. Holding the token is the
+// only credential, which is why it is 128 random bits and not the ref.
+//
+// Who the viewer is decides what comes back, and that is the whole
+// feature. Two audiences, one URL:
+//   - the spot's owner (or an admin), signed in: sees everything and can
+//     confirm the car arrived and parked;
+//   - anyone else, including the driver on a second phone or a passer-by:
+//     sees the parking details only. No driver name, no payment label.
+const passViewerRole = (user, booking) => {
+  if (!user) return "public";
+  if (user.role === "admin") return "admin";
+  if (booking.spot?.created_by === user.id) return "owner";
+  if (booking.user_id === user.id) return "driver";
+  return "public";
+};
+
+const passBody = (booking, role) => {
+  const { spot } = booking;
+  // Only the fields describing the parking itself. `created_by`, the
+  // driver's email and the pass token are never in here.
+  const base = {
+    ref: booking.ref,
+    status: booking.status,
+    date: booking.date,
+    time: booking.time,
+    hours: booking.hours,
+    total: booking.total,
+    arrivedAt: booking.arrived_at ?? null,
+    spot: spot && {
+      name: spot.name, address: spot.address, type: spot.type,
+      vehicle: spot.vehicle, price: spot.price, photo: spot.photo,
+      owner: spot.owner, lat: spot.lat, lng: spot.lng, verified: spot.verified,
+    },
+    viewer: role,
+    // Only the owner of this spot can vouch for a car being in it.
+    canConfirmArrival:
+      (role === "owner" || role === "admin") && booking.status === "active",
+  };
+
+  if (role === "public") return base;
+  return {
+    ...base,
+    driver: { name: booking.user?.name ?? "" },
+    paidVia: booking.paid_via || null,
+  };
+};
+
+// A token is a fixed-length hex string; anything else is not worth a
+// database round trip.
+const asPassToken = (v) => (/^[a-f0-9]{32}$/i.test(String(v ?? "")) ? String(v) : null);
+
+app.get("/api/pass/:token", handler((req, res) => {
+  const token = asPassToken(req.params.token);
+  const booking = token && db.findBookingByPassToken(token);
+  // Same 404 for a malformed token and an unknown one, so the shape of a
+  // valid token can't be probed for.
+  if (!booking) return res.status(404).json({ error: "That parking pass isn't valid." });
+
+  res.json({ pass: passBody(booking, passViewerRole(currentUser(req), booking)) });
+}));
+
+app.post("/api/pass/:token/arrival", requireUser, handler((req, res) => {
+  const token = asPassToken(req.params.token);
+  const booking = token && db.findBookingByPassToken(token);
+  if (!booking) return res.status(404).json({ error: "That parking pass isn't valid." });
+
+  const role = passViewerRole(req.user, booking);
+  if (role !== "owner" && role !== "admin") {
+    return res.status(403).json({
+      error: "Only the owner of this parking spot can confirm an arrival.",
+    });
+  }
+  if (booking.status !== "active") {
+    return res.status(409).json({ error: `This booking is ${booking.status}.` });
+  }
+
+  const updated = db.markBookingArrived(booking.id, req.user.id);
+  res.json({ pass: passBody(updated, passViewerRole(req.user, updated)) });
+}));
+
 // ─── FAVOURITES ─────────────────────────────────────────
 app.get("/api/favourites", requireUser, handler((req, res) => {
   res.json({ favourites: db.listFavourites(req.user.id) });
@@ -651,67 +885,6 @@ app.delete("/api/vehicles/:id", requireUser, handler((req, res) => {
   if (!id) return res.status(400).json({ error: "Invalid vehicle id." });
   if (!db.deleteVehicle(req.user.id, id)) {
     return res.status(404).json({ error: "Vehicle not found." });
-  }
-  res.json({ ok: true, deleted: id });
-}));
-
-// ─── PAYMENT METHODS ────────────────────────────────────
-// No real gateway is involved and no charge is ever made. The card number
-// is validated then discarded: only brand, last four and expiry persist.
-const luhnValid = (digits) => {
-  let sum = 0, alt = false;
-  for (let i = digits.length - 1; i >= 0; i--) {
-    let d = digits.charCodeAt(i) - 48;
-    if (alt) { d *= 2; if (d > 9) d -= 9; }
-    sum += d;
-    alt = !alt;
-  }
-  return sum % 10 === 0;
-};
-
-const brandOf = (digits) => {
-  if (/^4/.test(digits)) return "Visa";
-  if (/^5[1-5]/.test(digits)) return "Mastercard";
-  if (/^3[47]/.test(digits)) return "Amex";
-  if (/^6/.test(digits)) return "RuPay";
-  return "Card";
-};
-
-app.get("/api/payment-methods", requireUser, handler((req, res) => {
-  res.json({ methods: db.listPaymentMethods(req.user.id) });
-}));
-
-app.post("/api/payment-methods", requireUser, handler((req, res) => {
-  const { number, exp } = req.body ?? {};
-  const digits = String(number ?? "").replace(/\D/g, "");
-
-  if (digits.length < 13 || digits.length > 19) {
-    return res.status(400).json({ error: "Card number must be 13–19 digits." });
-  }
-  if (!luhnValid(digits)) {
-    return res.status(400).json({ error: "That card number fails the checksum." });
-  }
-  if (!/^\d{2}\/\d{2}$/.test(String(exp ?? ""))) {
-    return res.status(400).json({ error: "Expiry must be in MM/YY format." });
-  }
-  const [mm] = String(exp).split("/").map(Number);
-  if (mm < 1 || mm > 12) {
-    return res.status(400).json({ error: "Expiry month must be 01–12." });
-  }
-
-  const method = db.addPaymentMethod(req.user.id, {
-    brand: brandOf(digits),
-    last4: digits.slice(-4),
-    exp,
-  });
-  res.status(201).json({ method, simulated: true, note: "Stored for display only — no real charges." });
-}));
-
-app.delete("/api/payment-methods/:id", requireUser, handler((req, res) => {
-  const id = asId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid payment method id." });
-  if (!db.deletePaymentMethod(req.user.id, id)) {
-    return res.status(404).json({ error: "Payment method not found." });
   }
   res.json({ ok: true, deleted: id });
 }));
@@ -877,7 +1050,15 @@ app.patch("/api/users/:id", requireAdmin, handler((req, res) => {
   if (target.role === "admin" && role !== "admin" && db.countAdmins() <= 1) {
     return res.status(409).json({ error: "Cannot demote the last admin." });
   }
-  res.json({ user: db.setUserRole(id, role) });
+  const user = db.setUserRole(id, role);
+  // Null means this address already holds an account in the target role.
+  // Merging the two is not something a role dropdown should decide.
+  if (!user) {
+    return res.status(409).json({
+      error: `${target.email} already has a ${role} account. Delete one of them first.`,
+    });
+  }
+  res.json({ user });
 }));
 
 app.delete("/api/users/:id", requireAdmin, handler((req, res) => {

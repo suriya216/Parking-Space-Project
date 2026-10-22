@@ -109,5 +109,7 @@ export { expect };
 export { USERS, BAD_CREDENTIALS, newAccount } from "./users.fixture";
 export type { TestUser, UserKey } from "./users.fixture";
 /* Re-exported so a spec can sign in as an account it just created, which
-   the role-keyed `signIn` fixture can't express. */
-export { injectSession } from "./auth.fixture";
+   the role-keyed `signIn` fixture can't express. `signOutCompletely` is
+   for the specs that need a genuinely anonymous browser — scanning a
+   booking pass with no session is a supported path. */
+export { injectSession, signOutCompletely } from "./auth.fixture";

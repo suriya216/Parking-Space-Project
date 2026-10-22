@@ -4,11 +4,16 @@
 import type {
   AuthProviders,
   Booking,
+  BookingPass,
   OwnerEarnings,
+  LoginResult,
   PasswordResetResult,
-  PaymentMethod,
+  PaymentInput,
+  PaymentOrder,
+  PaymentReceipt,
   Place,
   Role,
+  RoleChoice,
   Session,
   Spot,
   SpotPhoto,
@@ -111,15 +116,42 @@ export const onUnauthorized = (fn: UnauthorizedHandler): void => {
   unauthorizedHandler = fn;
 };
 
-export const login = (email: string, password: string): Promise<Session> =>
-  request("/login", { method: "POST", body: { email, password } });
+/**
+ * Sign in to the account this email and password identify.
+ *
+ * An address can hold one account per role. The password normally picks
+ * out which, so `role` is omitted on the first attempt; if the same
+ * password opens more than one account the answer is a `RoleChoice`
+ * instead of a session, and the caller signs in again naming a role.
+ */
+export const login = (
+  email: string,
+  password: string,
+  role?: Role,
+): Promise<LoginResult> =>
+  request("/login", {
+    method: "POST",
+    body: role ? { email, password, role } : { email, password },
+  });
 
+/** Narrows a login answer that is a list of accounts, not a session. */
+export const isRoleChoice = (r: LoginResult): r is RoleChoice =>
+  "chooseRole" in r;
+
+/**
+ * Create an account.
+ *
+ * An address already registered in the OTHER role is not an error — that
+ * is a separate account, and this makes a second one alongside it with its
+ * own password. Re-registering the SAME role is rejected.
+ */
 export const register = (payload: {
   name: string;
   email: string;
   password: string;
   role: Role;
-}): Promise<Session> => request("/register", { method: "POST", body: payload });
+}): Promise<Session> =>
+  request("/register", { method: "POST", body: payload });
 
 // Omitting lat/lng returns every spot with distance: null. Passing them
 // returns real haversine distances, sorted nearest-first.
@@ -201,7 +233,7 @@ export const exchangeOAuthCode = (code: string): Promise<Session> =>
 // ─── PROFILE ────────────────────────────────────────────
 export const updateProfile = (
   token: string,
-  payload: Partial<Pick<User, "name" | "email" | "phone">>,
+  payload: Partial<Pick<User, "name" | "email" | "phone" | "upi_id">> & { upiId?: string },
 ): Promise<Session> => request("/me", { method: "PATCH", token, body: payload });
 
 export const changePassword = (
@@ -217,11 +249,37 @@ export const getBookings = (token: string): Promise<{ bookings: Booking[] }> =>
 
 // The date and time window are derived server-side from `startAt`
 // (defaults to now), so they always agree with the hours booked.
+//
+// `payment` is validated server-side and reduced to a display label; the
+// card number never reaches storage and is not kept here either.
 export const createBooking = (
   token: string,
-  { spotId, hours, startAt }: { spotId: number; hours: number; startAt?: string },
+  {
+    spotId,
+    hours,
+    startAt,
+    payment,
+  }: { spotId: number; hours: number; startAt?: string; payment: PaymentInput },
 ): Promise<{ booking: Booking }> =>
-  request("/bookings", { method: "POST", token, body: { spotId, hours, startAt } });
+  request("/bookings", { method: "POST", token, body: { spotId, hours, startAt, payment } });
+
+// ─── PAYMENTS ───────────────────────────────────────────
+// Opens a gateway order for a booking. The amount is computed server-side
+// from the spot's price, so the client cannot understate what it owes.
+export const createPaymentOrder = (
+  token: string,
+  { spotId, hours }: { spotId: number; hours: number },
+): Promise<PaymentOrder> =>
+  request("/payments/order", { method: "POST", token, body: { spotId, hours } });
+
+// Demo only: fakes the "paid in the UPI app" step and returns the signed
+// receipt the booking call needs. In production the real Razorpay Checkout
+// yields this instead.
+export const demoCompletePayment = (
+  token: string,
+  orderId: string,
+): Promise<PaymentReceipt> =>
+  request("/payments/demo-complete", { method: "POST", token, body: { orderId } });
 
 export const cancelBooking = (
   token: string,
@@ -235,6 +293,22 @@ export const extendBooking = (
   extendHours: number,
 ): Promise<{ booking: Booking }> =>
   request(`/bookings/${id}`, { method: "PATCH", token, body: { extendHours } });
+
+// ─── BOOKING PASS (the QR target) ───────────────────────
+// The token is passed with no session on purpose: whoever scanned the code
+// is standing at the space, and may be the owner on their own phone or a
+// passer-by. The server decides what to return from who is signed in, so
+// the token alone never reveals the driver.
+export const getPass = (
+  passToken: string,
+  token?: string,
+): Promise<{ pass: BookingPass }> => request(`/pass/${passToken}`, { token });
+
+export const confirmArrival = (
+  passToken: string,
+  token: string,
+): Promise<{ pass: BookingPass }> =>
+  request(`/pass/${passToken}/arrival`, { method: "POST", token });
 
 // ─── FAVOURITES ─────────────────────────────────────────
 // All three routes answer with the caller's full list of spot ids, not
@@ -266,23 +340,6 @@ export const addVehicle = (
 
 export const deleteVehicle = (token: string, id: number): Promise<{ ok: boolean }> =>
   request(`/vehicles/${id}`, { method: "DELETE", token });
-
-// ─── PAYMENT METHODS ────────────────────────────────────
-export const getPaymentMethods = (
-  token: string,
-): Promise<{ methods: PaymentMethod[] }> => request("/payment-methods", { token });
-
-export const addPaymentMethod = (
-  token: string,
-  payload: { number: string; exp: string },
-): Promise<{ method: PaymentMethod }> =>
-  request("/payment-methods", { method: "POST", token, body: payload });
-
-export const deletePaymentMethod = (
-  token: string,
-  id: number,
-): Promise<{ ok: boolean }> =>
-  request(`/payment-methods/${id}`, { method: "DELETE", token });
 
 // ─── OWNER / ADMIN ──────────────────────────────────────
 export const getOwnerEarnings = (token: string): Promise<OwnerEarnings> =>

@@ -66,16 +66,24 @@ export const vehicleDraft = (
 };
 
 /**
- * Card numbers. The app validates with Luhn and stores only brand/last4,
- * so these are standard published test numbers, not real cards.
+ * Card numbers used to pay for a booking. Cards are never saved — the
+ * server validates with Luhn, keeps a "Visa ···· 1111" label and discards
+ * the number — so these are standard published test numbers, not real
+ * cards.
  */
 export const CARDS = {
   validVisa: { number: "4111111111111111", expiry: "12/34", last4: "1111" },
   validMastercard: { number: "5555555555554444", expiry: "11/33", last4: "4444" },
-  /* Fails the Luhn check — the UI must reject it before it reaches the API. */
+  /* Fails the Luhn check — must be rejected before a booking is written. */
   luhnFailure: { number: "4111111111111112", expiry: "12/34" },
   tooShort: { number: "411111", expiry: "12/34" },
   expired: { number: "4111111111111111", expiry: "01/20" },
+} as const;
+
+/** UPI ids for the other half of the payment step. */
+export const UPI = {
+  valid: "e2edriver@okhdfc",
+  malformed: "not-a-upi-id",
 } as const;
 
 /** Coordinates used across the location specs. */

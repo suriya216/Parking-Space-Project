@@ -18,7 +18,6 @@ export const chromeLocators = (page: Page) => ({
 
   tabBar: page.getByTestId(TID.tabBar),
   tabHome: page.getByTestId(TID.tabHome),
-  tabSearch: page.getByTestId(TID.tabSearch),
   tabBookings: page.getByTestId(TID.tabBookings),
   tabSaved: page.getByTestId(TID.tabSaved),
   tabProfile: page.getByTestId(TID.tabProfile),
