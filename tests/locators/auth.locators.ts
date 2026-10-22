@@ -17,6 +17,7 @@ export const authLocators = (page: Page) => ({
 
   email: page.getByTestId(TID.authEmail),
   password: page.getByTestId(TID.authPassword),
+  passwordConfirm: page.getByTestId(TID.authPasswordConfirm),
   name: page.getByTestId(TID.authName),
   submit: page.getByTestId(TID.authSubmit),
   error: page.getByTestId(TID.authError),

@@ -25,6 +25,7 @@ export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps
   const [role, setRole] = useState<SelfServeRole>("driver");
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [name, setName] = useState("");
   const [err, setErr] = useState("");
   /* Set after a successful registration, cleared as soon as the user edits
@@ -32,6 +33,22 @@ export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps
   const [created, setCreated] = useState("");
   const [busy, setBusy] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
+  /* Set when one password turned out to open more than one of this
+     address's accounts, and the user has to say which they meant. */
+  const [choices, setChoices] = useState<Role[] | null>(null);
+
+  /* Credentials do not survive a change of which account the form is
+     talking about. Switching role or mode means the password on screen was
+     typed for a different account, so keeping it would send it somewhere
+     it was never meant to go — and would leave it sitting in a live input
+     long after it was needed. The email is deliberately kept: it is not a
+     secret and retyping it is pure friction. */
+  const resetCredentials = (): void => {
+    setPass("");
+    setConfirm("");
+    setChoices(null);
+    setErr("");
+  };
 
   /* Providers the server actually holds credentials for. Only these get a
      button — there is no fallback that fakes a sign-in. */
@@ -44,21 +61,37 @@ export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps
       .catch(() => setProviders([]));
   }, []);
 
-  const submit = async (): Promise<void> => {
+  /* `chosenRole` is set only when signing in again after an ambiguous
+     attempt, to name which of the address's accounts was meant. */
+  const submit = async (chosenRole?: Role): Promise<void> => {
     if (!email || !pass) {
       setErr("All fields are required.");
       return;
     }
-    if (mode === "register" && !name) {
-      setErr("Name is required.");
-      return;
+    if (mode === "register") {
+      if (!name) {
+        setErr("Name is required.");
+        return;
+      }
+      /* Caught here as well as on the server so a typo in a password the
+         user cannot read back is reported before an account is made with
+         it. The server still owns the length rule. */
+      if (pass !== confirm) {
+        setErr("Those passwords don't match.");
+        return;
+      }
     }
     setErr("");
     setCreated("");
     setBusy(true);
     try {
       if (mode === "login") {
-        onLogin(await api.login(email, pass));
+        const res = await api.login(email, pass, chosenRole);
+        if (api.isRoleChoice(res)) {
+          setChoices(res.chooseRole);
+          return;
+        }
+        onLogin(res);
         return;
       }
       /* Registering does not sign the new account in. The server hands
@@ -70,7 +103,7 @@ export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps
       await api.register({ name, email, password: pass, role });
       setMode("login");
       setName("");
-      setPass("");
+      resetCredentials();
       setCreated("Account created. Sign in to continue.");
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -112,7 +145,16 @@ export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps
               {(["driver", "owner"] as const).map((r) => (
                 <button
                   key={r}
-                  onClick={() => setRole(r)}
+                  onClick={() => {
+                    if (r === role) return;
+                    setRole(r);
+                    /* A different role is a different account, so all
+                       form fields are cleared to prevent mixing passwords
+                       or names between accounts. */
+                    resetCredentials();
+                    setName("");
+                    setCreated("");
+                  }}
                   data-testid={r === "driver" ? TID.authRoleDriver : TID.authRoleOwner}
                   className={cx(s.roleButton, role === r && s.roleButtonActive)}
                 >
@@ -134,21 +176,47 @@ export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps
         <label className={s.label}>Email or phone</label>
         <input
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            /* A different address is a different account, so a pending
+               role choice no longer applies to it. */
+            setChoices(null);
+          }}
           placeholder="name@example.com"
           data-testid={TID.authEmail}
+          autoComplete="username"
           className={s.input}
         />
 
         <label className={s.label}>Password</label>
+        {/* autoComplete matters here beyond convenience: without
+            new-password on the sign-up form, a browser offers the password
+            SAVED for this site, so the field arrives holding a value the
+            user never typed into it. */}
         <input
           value={pass}
           onChange={(e) => setPass(e.target.value)}
           type="password"
           placeholder="Enter password"
           data-testid={TID.authPassword}
-          className={cx(s.input, s.inputTight)}
+          autoComplete={mode === "register" ? "new-password" : "current-password"}
+          className={cx(s.input, mode === "login" && s.inputTight)}
         />
+
+        {mode === "register" && (
+          <>
+            <label className={s.label}>Confirm password</label>
+            <input
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              type="password"
+              placeholder="Re-enter password"
+              data-testid={TID.authPasswordConfirm}
+              autoComplete="new-password"
+              className={cx(s.input, s.inputTight)}
+            />
+          </>
+        )}
 
         {mode === "login" && (
           <div className={s.forgotRow}>
@@ -177,7 +245,37 @@ export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps
           </div>
         )}
 
-        <Btn full size="lg" testId={TID.authSubmit} busy={busy} onClick={submit}>
+        {/* The password opened more than one of this address's accounts,
+            which happens when the same password was chosen for both. The
+            password is already verified at this point — this only settles
+            which account to open. */}
+        {choices && (
+          <div data-testid={TID.authRoleChoice} className={s.roleChoice}>
+            <div className={s.roleChoiceText}>
+              This email has more than one account. Which one are you signing
+              in to?
+            </div>
+            <div className={s.roleRow}>
+              {choices.map((r) => (
+                <button
+                  key={r}
+                  onClick={() => void submit(r)}
+                  data-testid={TID.authRoleChoiceOption}
+                  data-role={r}
+                  className={s.roleButton}
+                >
+                  {r === "driver"
+                    ? "🚗 Driver"
+                    : r === "owner"
+                      ? "🏠 Space owner"
+                      : "🛠 Admin"}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <Btn full size="lg" testId={TID.authSubmit} busy={busy} onClick={() => void submit()}>
           {busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
         </Btn>
 
@@ -231,7 +329,7 @@ export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps
                 onClick={(e) => {
                   e.preventDefault();
                   setMode("register");
-                  setErr("");
+                  resetCredentials();
                   setCreated("");
                 }}
                 data-testid={TID.authSwitchToRegister}
@@ -248,7 +346,8 @@ export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps
                 onClick={(e) => {
                   e.preventDefault();
                   setMode("login");
-                  setErr("");
+                  resetCredentials();
+                  setName("");
                 }}
                 data-testid={TID.authSwitchToLogin}
                 className={s.switchLink}

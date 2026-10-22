@@ -3,7 +3,7 @@
 //   npm run db:reset
 //
 // Test runs add users and bookings, create and delete spots, toggle
-// `verified`, and save vehicles and cards. Deleting the extras is not
+// `verified`, and save vehicles. Deleting the extras is not
 // enough: a run can also DELETE a seeded spot (and cascade its bookings),
 // so this clears the deltas and then re-runs the seed, which is
 // idempotent and re-inserts anything missing.
@@ -13,7 +13,7 @@ import { DB_PATH, seed } from "./db.js";
 
 const db = new DatabaseSync(DB_PATH);
 
-const SEED_EMAILS = ["admin@parkspace.test", "owner@parkspace.test", "driver@parkspace.test"];
+const SEED_ACCOUNTS = ["admin@parkspace.test|admin", "owner@parkspace.test|owner", "driver@parkspace.test|driver"];
 const SEED_SPOTS = [
   "Lakshmi Residency", "Kumar's driveway", "Selva Complex parking",
   "Priya's compound", "Rajan Towers", "Green Park residence",
@@ -23,7 +23,7 @@ const VERIFIED = ["Lakshmi Residency", "Selva Complex parking", "Rajan Towers"];
 const count = (t) => db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n;
 const snapshot = () => ({
   users: count("users"), spots: count("spots"), bookings: count("bookings"),
-  vehicles: count("vehicles"), cards: count("payment_methods"), favourites: count("favourites"),
+  vehicles: count("vehicles"), favourites: count("favourites"),
 });
 
 const before = snapshot();
@@ -39,12 +39,13 @@ const list = (arr) => arr.map(() => "?").join(",");
 // listing as them — which the Playwright owner/admin specs do, and the
 // older e2e scripts never did.
 db.prepare(`DELETE FROM spots WHERE name NOT IN (${list(SEED_SPOTS)})`).run(...SEED_SPOTS);
-db.prepare(`DELETE FROM users WHERE email NOT IN (${list(SEED_EMAILS)})`).run(...SEED_EMAILS);
+// Accounts are keyed on (email, role), so a test can add a second-role
+// account on a seeded email; match the pair, not the email alone.
+db.prepare(`DELETE FROM users WHERE email || '|' || role NOT IN (${list(SEED_ACCOUNTS)})`).run(...SEED_ACCOUNTS);
 // All of them: seed() only recreates the canonical three when the table is
 // empty, and any survivor may have been extended or cancelled by a test.
 db.prepare("DELETE FROM bookings").run();
 db.prepare("DELETE FROM vehicles").run();
-db.prepare("DELETE FROM payment_methods").run();
 db.prepare("DELETE FROM favourites").run();
 
 // ── re-seed anything missing (spots, bookings, favourite, vehicle) ──

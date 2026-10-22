@@ -20,6 +20,7 @@ export const TID = {
   authHeading: "auth-heading",
   authEmail: "auth-email",
   authPassword: "auth-password",
+  authPasswordConfirm: "auth-password-confirm",
   authName: "auth-name",
   authSubmit: "auth-submit",
   authError: "auth-error",
@@ -31,6 +32,9 @@ export const TID = {
   authSwitchToLogin: "auth-switch-login",
   authRoleDriver: "auth-role-driver",
   authRoleOwner: "auth-role-owner",
+  authRoleHint: "auth-role-hint",
+  authRoleChoice: "auth-role-choice",
+  authRoleChoiceOption: "auth-role-choice-option",
   authSsoDivider: "auth-sso-divider",
   /* One button per provider the server holds real credentials for. There
      is no demo variant: the old `auth-sso-demo` buttons signed the seeded
@@ -48,7 +52,6 @@ export const TID = {
   // ─── app chrome ───────────────────────────────────────
   tabBar: "tab-bar",
   tabHome: "tab-home",
-  tabSearch: "tab-search",
   tabBookings: "tab-bookings",
   tabSaved: "tab-saved",
   tabProfile: "tab-profile",
@@ -121,12 +124,14 @@ export const TID = {
   detailTotal: "detail-total",
   detailBook: "detail-book",
 
-  // confirm booking
+  // confirm booking — payment is collected here, not saved in Profile
   confirmSheet: "confirm-sheet",
   confirmTotal: "confirm-total",
   confirmSubmit: "confirm-submit",
   confirmCancel: "confirm-cancel",
   confirmError: "confirm-error",
+  payModeOnline: "pay-mode-online",
+  payModeCash: "pay-mode-cash",
 
   // booking confirmed
   confirmScreen: "confirm-screen",
@@ -141,6 +146,23 @@ export const TID = {
   bookingCancel: "booking-cancel",
   bookingExtend: "booking-extend",
   bookingsEmpty: "bookings-empty",
+  /* Re-opens the QR pass for a booking already made. Without it the code
+     was reachable only on the confirmation screen, and pressing Done
+     there put it out of reach for good. */
+  bookingShowPass: "booking-show-pass",
+  bookingPaidVia: "booking-paid-via",
+
+  // ─── booking pass (the screen the QR opens) ───────────
+  passSheet: "pass-sheet",
+  passScreen: "pass-screen",
+  passRef: "pass-ref",
+  passQr: "pass-qr",
+  passStatus: "pass-status",
+  passDriver: "pass-driver",
+  passArrival: "pass-arrival",
+  passConfirmArrival: "pass-confirm-arrival",
+  passError: "pass-error",
+  passViewerNote: "pass-viewer-note",
 
   // ─── saved ────────────────────────────────────────────
   savedScreen: "saved-screen",
@@ -168,13 +190,9 @@ export const TID = {
   vehicleDelete: "vehicle-delete",
   vehiclesEmpty: "vehicles-empty",
 
-  cardsSheet: "cards-sheet",
-  cardRow: "card-row",
-  cardNumber: "card-number",
-  cardExpiry: "card-expiry",
-  cardAdd: "card-add",
-  cardDelete: "card-delete",
-  cardError: "card-error",
+  /* There is no payment-methods sheet: cards are not saved anywhere. The
+     driver pays while booking (see payModeCard above), so nothing in
+     Profile manages payment. */
 
   settingsSheet: "settings-sheet",
   settingsUnits: "settings-units",
@@ -246,7 +264,6 @@ export const RECORD_ATTR = {
   booking: "data-booking-id",
   user: "data-user-id",
   vehicle: "data-vehicle-id",
-  card: "data-card-id",
 } as const;
 
 export type RecordAttr = (typeof RECORD_ATTR)[keyof typeof RECORD_ATTR];

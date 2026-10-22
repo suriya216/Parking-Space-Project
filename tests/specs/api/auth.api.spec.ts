@@ -122,9 +122,53 @@ test.describe("POST /api/register", () => {
     expect(res.data.token).toBeTruthy();
   });
 
-  test("refuses a duplicate email", async ({ api }) => {
+  test("creates an account holding exactly the role it signed up with", async ({ api }) => {
+    const res = await api.register(newAccount("owner"));
+    expect(res.data.user.roles).toEqual(["owner"]);
+  });
+
+  test("refuses a second account in a role the email already has", async ({ api }) => {
     const res = await api.register({ ...newAccount("driver"), email: USERS.driver.email });
     expect(res.status).toBe(409);
+  });
+
+  test("the same email can hold the other role as a separate account", async ({ api }) => {
+    /* One person can both park and rent out a space. The second role is an
+       independent account on the same address, with its own password. */
+    const account = newAccount("driver");
+    const first = await api.registerOrThrow(account);
+
+    const second = await api.register({ ...account, role: "owner", password: "Other@12345" });
+    expect(second.status).toBe(201);
+    expect(second.data.user.id).not.toBe(first.user.id);
+    expect(second.data.user.role).toBe("owner");
+    expect(second.data.user.roles).toEqual(["owner"]);
+  });
+
+  test("each role signs in with its own password", async ({ api }) => {
+    const account = newAccount("driver");
+    await api.registerOrThrow(account);
+    await api.register({ ...account, role: "owner", password: "Other@12345" });
+
+    const asDriver = await api.login(account.email, account.password);
+    expect(asDriver.status).toBe(200);
+    expect(asDriver.data.user.role).toBe("driver");
+
+    const asOwner = await api.login(account.email, "Other@12345");
+    expect(asOwner.status).toBe(200);
+    expect(asOwner.data.user.role).toBe("owner");
+  });
+
+  test("adding a role still cannot be used to self-assign admin", async ({ api }) => {
+    const account = newAccount("driver");
+    await api.registerOrThrow(account);
+
+    const res = await api.call<{ user?: { role?: string; roles?: string[] } }>("/register", {
+      method: "POST",
+      body: { ...account, role: "admin" },
+    });
+    expect(res.status).toBe(400);
+    expect(res.data.user?.roles ?? []).not.toContain("admin");
   });
 
   test("refuses a self-assigned admin role", async ({ api }) => {
@@ -157,12 +201,11 @@ test.describe("profile", () => {
     expect(res.data.user.phone).toBe("+91 98400 11223");
   });
 
-  test("cannot take an email that already belongs to someone else", async ({ api }) => {
-    const driver = await api.loginOrThrow(USERS.driver.email, USERS.driver.password);
-    const res = await api.updateProfile(driver.token, {
-      name: "X",
-      email: USERS.admin.email,
-    });
+  test("cannot take an email already used by another account in the same role", async ({ api }) => {
+    /* Throwaway accounts, so a failure can't leave a seeded user renamed. */
+    const taken = await api.registerOrThrow(newAccount("driver"));
+    const mine = await api.registerOrThrow(newAccount("driver"));
+    const res = await api.updateProfile(mine.token, { name: "X", email: taken.user.email });
     expect(res.status).toBe(409);
   });
 });

@@ -1,7 +1,11 @@
 import type { Page } from "@playwright/test";
 
 import { TID } from "@shared/testids";
-import { bookingsLocators, savedLocators } from "@locators/driver.locators";
+import {
+  bookingsLocators,
+  passSheetLocators,
+  savedLocators,
+} from "@locators/driver.locators";
 
 import { BasePage } from "./BasePage";
 
@@ -9,11 +13,13 @@ import { BasePage } from "./BasePage";
 export class BookingsPage extends BasePage {
   readonly el: ReturnType<typeof bookingsLocators>;
   readonly saved: ReturnType<typeof savedLocators>;
+  readonly pass: ReturnType<typeof passSheetLocators>;
 
   constructor(page: Page) {
     super(page);
     this.el = bookingsLocators(page);
     this.saved = savedLocators(page);
+    this.pass = passSheetLocators(page);
   }
 
   async openFromTab(): Promise<void> {
@@ -59,5 +65,22 @@ export class BookingsPage extends BasePage {
   async statusOf(ref: string): Promise<string> {
     const card = this.el.cardByRef(ref);
     return (await card.getByTestId(TID.bookingStatus).textContent()) ?? "";
+  }
+
+  /**
+   * Re-open a booking's QR pass from its row. This is the route that did
+   * not exist before: the code was only on the confirmation screen, so
+   * pressing Done there lost it for good.
+   */
+  async showPassByRef(ref: string): Promise<void> {
+    const card = this.el.cardByRef(ref);
+    await card.waitFor({ state: "visible" });
+    await card.getByTestId(TID.bookingShowPass).click();
+    await this.pass.sheet.waitFor({ state: "visible" });
+  }
+
+  async closePass(): Promise<void> {
+    await this.pass.sheet.getByTestId(TID.sheetClose).click();
+    await this.pass.sheet.waitFor({ state: "detached" });
   }
 }

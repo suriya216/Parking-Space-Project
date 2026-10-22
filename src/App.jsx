@@ -388,6 +388,34 @@ const DetailScreen = ({ spot, onBack, onBook, units = "km", defaultHours = 2, is
           © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" style={{ color: COLORS.textSecondary }}>OpenStreetMap</a> contributors
         </div>
 
+        {/* Payment methods accepted at this spot */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 0", borderBottom: `1px solid ${COLORS.g100}` }}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: COLORS.g100, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Icon name="cash" size={18} color={COLORS.blue} />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: COLORS.textSecondary }}>Payment methods</div>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              {(() => {
+                try {
+                  const methods = spot.accepted_payment_methods ? JSON.parse(spot.accepted_payment_methods) : ["online", "cash"];
+                  const badges = {
+                    online: { emoji: "�", label: "Online (UPI/Card)" },
+                    cash: { emoji: "💵", label: "Cash" },
+                  };
+                  return methods.map(m => badges[m]).filter(Boolean).map((b, i) => (
+                    <span key={i} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 12, background: COLORS.g100, color: COLORS.navy, fontWeight: 500 }}>
+                      {b.emoji} {b.label}
+                    </span>
+                  ));
+                } catch {
+                  return <span style={{ fontSize: 12, color: COLORS.textSecondary }}>Online, Cash</span>;
+                }
+              })()}
+            </div>
+          </div>
+        </div>
+
         {[
           { icon: "clock", label: "Availability", value: spot.available },
           { icon: "car", label: "Vehicle type", value: spot.vehicle },
@@ -438,10 +466,27 @@ const DetailScreen = ({ spot, onBack, onBook, units = "km", defaultHours = 2, is
 // ─── CONFIRM BOOKING ────────────────────────────────────
 // Booking takes money and commits a slot, so it gets an explicit review
 // step rather than firing straight off a single tap.
+//
+// Payment is collected HERE and nowhere else. There is no saved-card list
+// in Profile: the details are validated server-side, reduced to a display
+// label ("Visa ···· 4242", "Cash") and discarded, so the only thing that
+// outlives the request is that label on the booking.
 const ConfirmBookingSheet = ({ spot, hours, units, busy, error, onCancel, onConfirm }) => {
   const subtotal = spot.price * hours;
   const fee = Math.round(subtotal * 0.1);
   const total = Math.round(subtotal * 1.1);
+
+  // Parse available payment methods for this spot ("online" / "cash").
+  const availableMethods = (() => {
+    try {
+      const methods = spot.accepted_payment_methods ? JSON.parse(spot.accepted_payment_methods) : ["online", "cash"];
+      return Array.isArray(methods) ? methods : ["online", "cash"];
+    } catch {
+      return ["online", "cash"];
+    }
+  })();
+
+  const [mode, setMode] = useState(availableMethods[0] || "online");
 
   const row = (label, value, strong) => (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 0", fontSize: strong ? 15 : 13 }}>
@@ -450,17 +495,20 @@ const ConfirmBookingSheet = ({ spot, hours, units, busy, error, onCancel, onConf
     </div>
   );
 
+  // Button label changes with the method: online pays now, cash reserves.
+  const paymentButtonLabel = mode === "cash" ? "Confirm booking" : `Pay ₹${total}`;
+
   return (
     <Sheet
-      title="Confirm your booking"
-      subtitle="Check the details before you book."
+      title="Confirm and pay"
+      subtitle="Check the details, then pay to reserve the spot."
       onClose={busy ? () => {} : onCancel}
       testId={TID.confirmSheet}
       footer={
         <div style={{ display: "flex", gap: 10 }}>
           <Btn variant="ghost" full testId={TID.confirmCancel} onClick={busy ? undefined : onCancel}>Back</Btn>
-          <Btn full testId={TID.confirmSubmit} onClick={busy ? undefined : onConfirm} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
-            {busy ? "Booking…" : `Confirm · ₹${total}`}
+          <Btn full testId={TID.confirmSubmit} onClick={busy ? undefined : () => onConfirm({ mode })} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+            {busy ? "Processing…" : paymentButtonLabel}
           </Btn>
         </div>
       }
@@ -491,22 +539,65 @@ const ConfirmBookingSheet = ({ spot, hours, units, busy, error, onCancel, onConf
         <div data-testid={TID.confirmTotal}>{row("Total", `₹${total}`, true)}</div>
       </div>
 
-      <Notice tone="info">
-        Demo booking — no payment is taken. You can cancel or extend it
-        afterwards from the Bookings tab.
-      </Notice>
+      <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.g700, display: "block", marginBottom: 8 }}>
+        Pay with
+      </span>
+      <div role="radiogroup" aria-label="Payment method" style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {[
+          { id: "online", label: "Online", icon: "cash", testId: TID.payModeOnline },
+          { id: "cash", label: "Cash", icon: "check", testId: TID.payModeCash },
+        ]
+          .filter(m => availableMethods.includes(m.id))
+          .map(m => (
+            <button
+              key={m.id}
+              role="radio"
+              aria-checked={mode === m.id}
+              onClick={() => setMode(m.id)}
+              data-testid={m.testId}
+              style={{
+                flex: 1,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                minHeight: 44, padding: "10px 12px", borderRadius: 12, cursor: "pointer",
+                fontFamily: fontB, fontSize: 13, fontWeight: 600,
+                border: `1.5px solid ${mode === m.id ? COLORS.navy : COLORS.g300}`,
+                background: mode === m.id ? COLORS.navy : COLORS.white,
+                color: mode === m.id ? COLORS.white : COLORS.g700,
+              }}
+            >
+              <Icon name={m.icon} size={15} color={mode === m.id ? COLORS.white : COLORS.g600} />
+              {m.label}
+            </button>
+          ))}
+      </div>
+
+      {mode === "online" ? (
+        <Notice tone="info">
+          📲 You'll be taken to the secure payment screen to pay by UPI app, card
+          or netbanking. Your booking is confirmed the moment payment succeeds.
+        </Notice>
+      ) : (
+        <Notice tone="info">
+          💵 Please pay the owner in cash. Your booking is reserved now and shows
+          as "Payment Pending" until the owner confirms they received it.
+        </Notice>
+      )}
     </Sheet>
   );
 };
 
 // ─── BOOKING QR ─────────────────────────────────────────
-// A genuinely scannable code carrying the booking reference and spot, so
-// an attendant's phone reads something meaningful. This replaces a
-// hard-coded pixel pattern that looked like a QR but decoded to nothing.
-const BookingQr = ({ booking }) => {
+// A genuinely scannable code carrying the booking details as plain lines,
+// so any scanner app shows them, plus a link to the in-app pass. The
+// encoded text is not mirrored on screen: everything in it is already
+// rendered around the code.
+//
+// Used in two places, which is why it takes its own test id: the
+// confirmation screen right after paying, and the pass sheet reachable
+// from the Bookings tab for as long as the booking exists.
+const BookingQr = ({ booking, testId, size = 160 }) => {
   const [src, setSrc] = useState("");
   const [err, setErr] = useState(false);
-  const [showText, setShowText] = useState(false);
 
   const payload = bookingQrPayload(booking, window.location.origin);
 
@@ -524,27 +615,218 @@ const BookingQr = ({ booking }) => {
   }, [payload]);
 
   return (
-    <div data-testid={TID.confirmQr} style={{ textAlign: "center", marginBottom: 24 }}>
-      <div style={{ width: 172, height: 172, border: `2px solid ${COLORS.g200}`, borderRadius: 12, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", background: COLORS.white }}>
+    <div data-testid={testId} style={{ textAlign: "center", marginBottom: 24 }}>
+      <div style={{ width: size + 12, height: size + 12, border: `2px solid ${COLORS.g200}`, borderRadius: 12, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", background: COLORS.white }}>
         {src
-          ? <img src={src} alt={`QR code for booking ${booking.ref}`} style={{ width: 160, height: 160, display: "block" }} />
+          ? <img src={src} alt={`QR code for booking ${booking.ref}`} style={{ width: size, height: size, display: "block" }} />
           : <span style={{ fontSize: 11, color: COLORS.textTertiary }}>{err ? "QR unavailable" : "…"}</span>}
       </div>
       <div style={{ fontSize: 11, color: COLORS.textTertiary, marginTop: 6, fontFamily: "monospace" }}>{booking.ref}</div>
-      <button
-        onClick={() => setShowText(v => !v)}
-        style={{ marginTop: 8, minHeight: 40, padding: "9px 14px", background: "none", border: `1px solid ${COLORS.g300}`, borderRadius: 99, fontFamily: fontB, fontSize: 12, fontWeight: 600, color: COLORS.blue, cursor: "pointer" }}
-      >
-        {showText ? "Hide encoded details" : "What's in this code?"}
-      </button>
-      {showText && (
-        <pre style={{
-          textAlign: "left", background: COLORS.g50, border: `1px solid ${COLORS.g200}`, borderRadius: 10,
-          padding: 12, marginTop: 10, fontSize: 10.5, lineHeight: 1.5, color: COLORS.g700,
-          whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "monospace",
-        }}>{payload}</pre>
-      )}
     </div>
+  );
+};
+
+// ─── BOOKING PASS SHEET ─────────────────────────────────
+// The driver's own copy of the code, re-openable from the Bookings tab.
+// Pressing Done on the confirmation screen used to be a one-way door: the
+// QR was gone and there was no way back to it.
+const BookingPassSheet = ({ booking, onClose }) => (
+  <Sheet
+    title="Parking pass"
+    subtitle={`${booking.spot.name} · ${booking.date}`}
+    onClose={onClose}
+    testId={TID.passSheet}
+    footer={<Btn full size="lg" onClick={onClose}>Close</Btn>}
+  >
+    <div style={{ textAlign: "center", fontSize: 13, color: COLORS.textSecondary, marginBottom: 10 }}>
+      Show this at the spot. The owner scans it to confirm you've parked.
+    </div>
+    <BookingQr booking={booking} testId={TID.passQr} />
+
+    <div style={{ background: COLORS.g50, borderRadius: 12, padding: "6px 14px" }}>
+      {[
+        ["Spot", booking.spot.name],
+        ["Address", booking.spot.address],
+        ["Date", booking.date],
+        ["Time", `${booking.time} (${booking.hours}h)`],
+        ["Paid", `₹${booking.total}${booking.paid_via ? ` · ${booking.paid_via}` : ""}`],
+        ["Reference", `#${booking.ref}`],
+      ].map(([label, value]) => (
+        <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 0", fontSize: 13 }}>
+          <span style={{ color: COLORS.textSecondary, flexShrink: 0 }}>{label}</span>
+          <span style={{ color: COLORS.navy, fontWeight: 600, textAlign: "right" }}>{value}</span>
+        </div>
+      ))}
+    </div>
+
+    <div data-testid={TID.passArrival} style={{ marginTop: 14 }}>
+      <Notice tone={booking.arrived_at ? "success" : "info"}>
+        {booking.arrived_at
+          ? "The owner has confirmed your car arrived and parked."
+          : "Not yet checked in — the owner confirms this when you arrive."}
+      </Notice>
+    </div>
+  </Sheet>
+);
+
+// ─── SCANNED PASS SCREEN (?pass=<token>) ────────────────
+// Where the QR code lands, and the only screen in the app that renders
+// without a session — whoever scanned the code is standing at the space
+// and may not have an account at all.
+//
+// One URL, two audiences, and the server decides which you are from the
+// token you send with the request:
+//   - the owner of this spot, signed in: gets the driver's name and a
+//     button to confirm the car arrived and parked;
+//   - anyone else, the driver's second phone included: gets the parking
+//     details and nothing personal. No name, no payment, no confirm
+//     button — the server won't return them or honour it.
+const PassScreen = ({ passToken, authToken, onExit }) => {
+  const [pass, setPass] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // Re-runs when a session appears, so signing in as the owner in another
+  // tab and coming back upgrades this view rather than stranding it.
+  useEffect(() => {
+    let cancelled = false;
+    api.getPass(passToken, authToken)
+      .then(d => { if (!cancelled) { setPass(d.pass); setErr(""); } })
+      .catch(e => { if (!cancelled) setErr(e.message); });
+    return () => { cancelled = true; };
+  }, [passToken, authToken]);
+
+  const confirmArrival = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      const d = await api.confirmArrival(passToken, authToken);
+      setPass(d.pass);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const shell = (children) => (
+    <div className="ps-screen-min-h" data-testid={TID.passScreen} style={{ background: COLORS.white, fontFamily: fontB, minHeight: "100vh" }}>
+      {children}
+    </div>
+  );
+
+  if (err && !pass) {
+    return shell(
+      <div className="ps-content-column" style={{ padding: "48px 20px" }}>
+        <div data-testid={TID.passError}><Notice>{err}</Notice></div>
+        <Btn full onClick={onExit}>Open ParkSpace</Btn>
+      </div>
+    );
+  }
+
+  if (!pass) {
+    return shell(
+      <div style={{ padding: 48, textAlign: "center", color: COLORS.textTertiary, fontSize: 14 }}>
+        Loading parking pass…
+      </div>
+    );
+  }
+
+  const arrived = Boolean(pass.arrivedAt);
+  const tone = pass.status === "active" ? (arrived ? COLORS.mint : COLORS.g50) : COLORS.g100;
+  // SQLite's datetime('now') is UTC with no zone marker, which JS would
+  // otherwise read as local time and show an hours-off arrival.
+  const arrivedLabel = pass.arrivedAt
+    ? new Date(`${pass.arrivedAt.replace(" ", "T")}Z`).toLocaleString()
+    : "";
+
+  return shell(
+    <>
+      <div style={{ background: tone, padding: "40px 20px 28px", textAlign: "center" }}>
+        <div style={{ fontFamily: fontD, fontSize: 22, fontWeight: 700, color: COLORS.navy }}>
+          {pass.spot.name}
+        </div>
+        <div style={{ fontSize: 13, color: COLORS.textSecondary, marginTop: 4 }}>{pass.spot.address}</div>
+        <div data-testid={TID.passStatus} style={{ marginTop: 12 }}>
+          <Badge color={pass.status === "active" ? (arrived ? "green" : "blue") : "gray"}>
+            {arrived ? "Parked · arrival confirmed" : pass.status[0].toUpperCase() + pass.status.slice(1)}
+          </Badge>
+        </div>
+      </div>
+
+      <div className="ps-content-column" style={{ padding: 20 }}>
+        {err && <div data-testid={TID.passError}><Notice>{err}</Notice></div>}
+
+        <div style={{ background: COLORS.g50, borderRadius: 14, padding: "6px 16px", marginBottom: 16 }}>
+          {[
+            ["Reference", <span data-testid={TID.passRef} key="ref">#{pass.ref}</span>],
+            ["Date", pass.date],
+            ["Time", `${pass.time} (${pass.hours}h)`],
+            ["Spot type", `${pass.spot.type} · fits ${pass.spot.vehicle}`],
+            ["Spot owner", pass.spot.owner],
+            // Driver and payment come back only for the owner, the driver
+            // or an admin; for anyone else the keys are simply absent.
+            ...(pass.driver ? [["Driver", <span data-testid={TID.passDriver} key="driver">{pass.driver.name}</span>]] : []),
+            ...(pass.paidVia ? [["Paid", `₹${pass.total} · ${pass.paidVia}`]] : []),
+          ].map(([label, value], i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "9px 0", fontSize: 13, borderBottom: `1px solid ${COLORS.g100}` }}>
+              <span style={{ color: COLORS.textSecondary, flexShrink: 0 }}>{label}</span>
+              <span style={{ color: COLORS.navy, fontWeight: 600, textAlign: "right" }}>{value}</span>
+            </div>
+          ))}
+        </div>
+
+        <div data-testid={TID.passArrival} style={{ marginBottom: 16 }}>
+          {arrived ? (
+            <Notice tone="success">
+              Arrival confirmed{arrivedLabel ? ` at ${arrivedLabel}` : ""}. The car is parked
+              in this spot for this booking.
+            </Notice>
+          ) : pass.canConfirmArrival ? (
+            <Notice tone="info">
+              This is your spot. Confirm once you've seen the car parked in it.
+            </Notice>
+          ) : (
+            <Notice tone="info">
+              {pass.status === "active"
+                ? "This booking is active. Only the owner of this spot can confirm an arrival."
+                : `This booking is ${pass.status}.`}
+            </Notice>
+          )}
+        </div>
+
+        {pass.canConfirmArrival && !arrived && (
+          <div style={{ marginBottom: 12 }}>
+            <Btn full size="lg" testId={TID.passConfirmArrival} onClick={busy ? undefined : confirmArrival} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+              {busy ? "Confirming…" : "Confirm arrived and parked"}
+            </Btn>
+          </div>
+        )}
+
+        {/* Says plainly why there is no confirm button, rather than
+            leaving a signed-out scanner to wonder what's missing. */}
+        {pass.viewer === "public" && (
+          <div data-testid={TID.passViewerNote} style={{ fontSize: 12, color: COLORS.textTertiary, lineHeight: 1.6, marginBottom: 16 }}>
+            You're seeing the parking details only. Sign in as the owner of
+            this spot to confirm an arrival.
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <Btn
+            variant="secondary"
+            full
+            onClick={() => window.open(
+              `https://www.openstreetmap.org/directions?to=${pass.spot.lat},${pass.spot.lng}`,
+              "_blank", "noopener"
+            )}
+          >
+            Directions
+          </Btn>
+          <Btn variant="outline" full onClick={onExit}>Open ParkSpace</Btn>
+        </div>
+      </div>
+    </>
   );
 };
 
@@ -552,9 +834,16 @@ const BookingQr = ({ booking }) => {
 const ConfirmScreen = ({ booking, onDone }) => {
   useBackGuard(true, onDone);
 
+  // Determine the header text based on payment status
+  const isCashPending = booking.payment_status === "pending";
+  const headerText = isCashPending ? "Booking confirmed" : "Booking confirmed";
+  const subText = isCashPending ? "Payment pending - awaiting cash receipt" : "Your spot is reserved";
+  const headerBgColor = isCashPending ? "#FFF3E0" : COLORS.mint;
+  const headerTextColor = isCashPending ? "#FF9800" : COLORS.textBrand;
+
   return (
   <div className="ps-screen-min-h" data-testid={TID.confirmScreen} {...record(RECORD_ATTR.booking, booking.id)} style={{ background: COLORS.white }}>
-    <div style={{ position: "relative", background: COLORS.mint, padding: "48px 20px 32px", textAlign: "center" }}>
+    <div style={{ position: "relative", background: headerBgColor, padding: "48px 20px 32px", textAlign: "center" }}>
       {/* Previously the only way out was the "Done" button far below the
           fold; Back and this close button now both work. */}
       <button
@@ -569,10 +858,10 @@ const ConfirmScreen = ({ booking, onDone }) => {
         <Icon name="x" size={18} color={COLORS.navy} />
       </button>
       <div style={{ width: 64, height: 64, borderRadius: "50%", background: "white", margin: "0 auto 16px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <Icon name="check" size={32} color={COLORS.textBrand} />
+        <Icon name={isCashPending ? "clock" : "check"} size={32} color={headerTextColor} />
       </div>
-      <div style={{ fontFamily: fontD, fontSize: 24, fontWeight: 700, color: COLORS.navy }}>Booking confirmed</div>
-      <div style={{ fontSize: 14, color: COLORS.blue, marginTop: 4 }}>Your spot is reserved</div>
+      <div style={{ fontFamily: fontD, fontSize: 24, fontWeight: 700, color: COLORS.navy }}>{headerText}</div>
+      <div style={{ fontSize: 14, color: headerTextColor, marginTop: 4 }}>{subText}</div>
     </div>
     <div style={{ padding: 20 }}>
       <div style={{ background: COLORS.g50, borderRadius: 14, padding: 16, marginBottom: 20 }}>
@@ -591,12 +880,30 @@ const ConfirmScreen = ({ booking, onDone }) => {
           ))}
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", padding: "16px 0 0", borderTop: `2px dashed ${COLORS.g200}`, marginTop: 14 }}>
-          <span style={{ fontSize: 15, fontWeight: 600, color: COLORS.g700 }}>Total paid</span>
+          <span style={{ fontSize: 15, fontWeight: 600, color: COLORS.g700 }}>{isCashPending ? "Amount to pay" : "Total paid"}</span>
           <span style={{ fontFamily: fontD, fontSize: 22, fontWeight: 700, color: COLORS.navy }}>₹{booking.total}</span>
         </div>
+        {isCashPending && (
+          <div style={{ marginTop: 14, padding: 12, background: "#fff3cd", borderRadius: 8, fontSize: 12, color: "#856404" }}>
+            💵 Please arrange cash payment with the owner. Your booking status will update to "Confirmed" once they verify receipt.
+          </div>
+        )}
       </div>
-      <div style={{ textAlign: "center", fontSize: 13, color: COLORS.textSecondary, marginBottom: 8 }}>Scan QR code at the spot</div>
-      <BookingQr booking={booking} />
+      {booking.payment_status === "confirmed" && (
+        <>
+          <div style={{ textAlign: "center", fontSize: 13, color: COLORS.textSecondary, marginBottom: 8 }}>Show this code at the spot — scanning it shows the booking details</div>
+          <BookingQr booking={booking} testId={TID.confirmQr} />
+        </>
+      )}
+      {/* Done used to lose the code for good. Say where it lives now, and
+          the Bookings tab has a "Show pass" button on every booking. */}
+      <div style={{ marginBottom: 16 }}>
+        <Notice tone="info">
+          {isCashPending
+            ? "You'll receive a notification once the owner confirms the cash payment."
+            : "This pass stays in your Bookings tab — open it any time with \"Show pass\"."}
+        </Notice>
+      </div>
       <div style={{ display: "flex", gap: 10 }}>
         <Btn
           variant="secondary"
@@ -798,91 +1105,6 @@ const VehiclesSheet = ({ token, onClose }) => {
       <Field label="Model" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} placeholder="Hyundai i20" data-testid={TID.vehicleLabel} />
       <Field label="Plate number" value={form.plate} onChange={e => setForm(f => ({ ...f, plate: e.target.value }))} placeholder="TN 09 BX 4412" data-testid={TID.vehiclePlate} />
       <Select label="Type" value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} options={VEHICLE_TYPES} data-testid={TID.vehicleType} />
-    </Sheet>
-  );
-};
-
-// ─── PAYMENT METHODS ────────────────────────────────────
-const CardsSheet = ({ token, onClose }) => {
-  const [list, setList] = useState([]);
-  const [form, setForm] = useState({ number: "", exp: "" });
-  const [err, setErr] = useState("");
-  const [loading, setLoading] = useState(true);
-
-  // Deliberately does NOT clear `err` on success. This runs once on mount,
-  // and on a slow connection its response can land *after* the user has
-  // already submitted a bad card — clearing the error here then wipes the
-  // "that card was rejected" message they need to see. Errors are cleared
-  // by the next user action instead (see add/remove below).
-  const load = useCallback(() => {
-    api.getPaymentMethods(token)
-      .then(d => setList(d.methods))
-      .catch(e => setErr(e.message))
-      .finally(() => setLoading(false));
-  }, [token]);
-
-  useEffect(load, [load]);
-
-  const add = async () => {
-    setErr("");
-    try {
-      const d = await api.addPaymentMethod(token, form);
-      setList(prev => [...prev, d.method]);
-      setForm({ number: "", exp: "" });
-    } catch (e) {
-      setErr(e.message);
-    }
-  };
-
-  const remove = async (m) => {
-    try {
-      await api.deletePaymentMethod(token, m.id);
-      setList(prev => prev.filter(x => x.id !== m.id));
-    } catch (e) {
-      setErr(e.message);
-    }
-  };
-
-  return (
-    <Sheet title="Payment methods" onClose={onClose}
-      testId={TID.cardsSheet}
-      footer={<Btn full size="lg" testId={TID.cardAdd} onClick={add}>Add card</Btn>}>
-      <Notice tone="info">
-        Demo only — no gateway is connected and no charge is ever made. Only the
-        brand, last four digits and expiry are stored; the number is validated
-        then discarded.
-      </Notice>
-      {err && <div data-testid={TID.cardError}><Notice>{err}</Notice></div>}
-      {loading && <div style={{ color: COLORS.textTertiary, fontSize: 14, padding: "8px 0" }}>Loading…</div>}
-      {!loading && list.length === 0 && (
-        <div style={{ color: COLORS.textSecondary, fontSize: 13, marginBottom: 14 }}>No cards saved yet.</div>
-      )}
-      {list.map(m => (
-        <Row
-          key={m.id}
-          testId={TID.cardRow}
-          dataAttrs={record(RECORD_ATTR.card, m.id)}
-          icon="cash"
-          label={`${m.brand} •••• ${m.last4}`}
-          value={`Expires ${m.exp}`}
-          right={
-            <button onClick={() => remove(m)} aria-label={`Remove card ending ${m.last4}`} data-testid={TID.cardDelete} style={{ background: "none", border: "none", cursor: "pointer", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <Icon name="x" size={15} color={COLORS.textTertiary} />
-            </button>
-          }
-        />
-      ))}
-      <div style={{ height: 1, background: COLORS.g200, margin: "18px 0" }} />
-      <Field
-        label="Card number"
-        value={form.number}
-        onChange={e => setForm(f => ({ ...f, number: e.target.value }))}
-        placeholder="4242 4242 4242 4242"
-        inputMode="numeric"
-        hint="Try 4242 4242 4242 4242 — must pass the Luhn checksum."
-        data-testid={TID.cardNumber}
-      />
-      <Field label="Expiry (MM/YY)" value={form.exp} onChange={e => setForm(f => ({ ...f, exp: e.target.value }))} placeholder="11/28" data-testid={TID.cardExpiry} />
     </Sheet>
   );
 };
@@ -1368,6 +1590,24 @@ const OwnerDashboard = ({ user, token, onLogout }) => {
                     <Badge color={b.status === "active" ? "blue" : b.status === "cancelled" ? "red" : "gray"}>{b.status}</Badge>
                   </div>
                   <div style={{ fontSize: 12, color: COLORS.textSecondary }}>{b.spot.name} · {b.date} · {b.hours}h</div>
+                  {/* Arrival is the owner's own record of whether the car
+                      turned up. Scanning the driver's QR is the usual way
+                      in; this opens the same pass screen, which is where
+                      the confirm button lives, so there is only one path
+                      that can set it. */}
+                  {b.status === "active" && (
+                    b.arrived_at ? (
+                      <div style={{ fontSize: 12, color: COLORS.textBrand, fontWeight: 600, marginTop: 3, display: "flex", alignItems: "center", gap: 4 }}>
+                        <Icon name="check" size={13} color={COLORS.textBrand} /> Arrived and parked
+                      </div>
+                    ) : b.pass_token && (
+                      <div style={{ marginTop: 6 }}>
+                        <Btn size="sm" variant="outline" onClick={() => { window.location.search = `?pass=${b.pass_token}`; }}>
+                          Check in
+                        </Btn>
+                      </div>
+                    )
+                  )}
                 </div>
                 <div style={{ fontFamily: fontD, fontWeight: 700, color: b.status === "cancelled" ? COLORS.textTertiary : COLORS.textSuccess, fontSize: 15 }}>
                   {b.status === "cancelled" ? `₹${b.total}` : `+₹${b.total}`}
@@ -1497,7 +1737,6 @@ const OwnerDashboard = ({ user, token, onLogout }) => {
 // map callback so the two can't fall out of step.
 const TAB_TEST_IDS = {
   home: TID.tabHome,
-  search: TID.tabSearch,
   bookings: TID.tabBookings,
   saved: TID.tabSaved,
   profile: TID.tabProfile,
@@ -1525,7 +1764,10 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
   const [favourites, setFavourites] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [bookingsErr, setBookingsErr] = useState("");
-  const [sheet, setSheet] = useState(null); // filter | profile | vehicles | cards | settings | safety
+  const [sheet, setSheet] = useState(null); // filter | profile | vehicles | settings | safety
+  // The booking whose QR pass is open, so it survives leaving the
+  // confirmation screen.
+  const [passBooking, setPassBooking] = useState(null);
   const [advanced, setAdvanced] = useState({ maxPrice: 0, verifiedOnly: false, sort: "distance" });
   const { confirm, dialog: confirmDialog } = useConfirm();
 
@@ -1581,12 +1823,30 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
     setPendingBooking({ spot, hours });
   };
 
-  const confirmBooking = async () => {
+  const confirmBooking = async (payment) => {
     if (!pendingBooking) return;
     const { spot, hours } = pendingBooking;
     setBookingState({ busy: true, error: "" });
     try {
-      const { booking: made } = await api.createBooking(token, { spotId: spot.id, hours });
+      let receipt = payment;
+      if (payment.mode === "online") {
+        // Open an order, then pay it. Only the demo gateway completes here;
+        // live keys need the real Checkout widget, which is not bundled.
+        const order = await api.createPaymentOrder(token, { spotId: spot.id, hours });
+        if (order.live) {
+          throw new Error("Online checkout is not available in this build. Pay by cash instead.");
+        }
+        const paid = await api.demoCompletePayment(token, order.orderId);
+        receipt = {
+          mode: "online",
+          orderId: order.orderId,
+          paymentId: paid.paymentId,
+          signature: paid.signature,
+          amount: order.amount,
+          method: "upi",
+        };
+      }
+      const { booking: made } = await api.createBooking(token, { spotId: spot.id, hours, payment: receipt });
       setPendingBooking(null);
       setBooking(made);
       setScreen("confirm");
@@ -1719,7 +1979,6 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
 
   const tabs = [
     { id: "home", label: "Home", icon: "home" },
-    { id: "search", label: "Search", icon: "search" },
     { id: "bookings", label: "Bookings", icon: "calendar" },
     { id: "saved", label: "Saved", icon: "heart" },
     { id: "profile", label: "Profile", icon: "user" },
@@ -1727,7 +1986,7 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
 
   return (
     <div className="ps-screen-h" data-testid={TID.driverHome} style={{ display: "flex", flexDirection: "column", background: COLORS.white, fontFamily: fontB }}>
-      {(tab === "home" || tab === "search") && (
+      {tab === "home" && (
         <>
           <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column" }}>
             {/* `isolation: isolate` traps Leaflet's internal z-indexes (up to
@@ -1885,34 +2144,64 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8 }}>
                   <div style={{ fontSize: 15, fontWeight: 600, color: COLORS.navy }}>{b.spot.name}</div>
-                  <span data-testid={TID.bookingStatus}>
-                    <Badge color={b.status === "active" ? "blue" : b.status === "cancelled" ? "red" : "gray"}>
-                      {b.status[0].toUpperCase() + b.status.slice(1)}
-                    </Badge>
-                  </span>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <span data-testid={TID.bookingStatus}>
+                      <Badge color={b.status === "active" ? "blue" : b.status === "cancelled" ? "red" : "gray"}>
+                        {b.status[0].toUpperCase() + b.status.slice(1)}
+                      </Badge>
+                    </span>
+                    {b.payment_status && (
+                      <span data-testid="bookingPaymentStatus">
+                        <Badge color={b.payment_status === "confirmed" ? "green" : b.payment_status === "pending" ? "orange" : "red"}>
+                          {b.payment_status === "confirmed" ? "✓ Confirmed" : b.payment_status === "pending" ? "⏳ Pending" : "✗ Failed"}
+                        </Badge>
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div style={{ fontSize: 12, color: COLORS.textSecondary, margin: "4px 0" }}>{b.date} · {b.time}</div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span style={{ fontSize: 12, color: COLORS.textSecondary }}>#{b.ref} · {b.hours}h</span>
                   <span style={{ fontFamily: fontD, fontWeight: 700, color: COLORS.navy }}>₹{b.total}</span>
                 </div>
-                {/* Only an active booking can be changed; the server enforces
-                    this too, so a stale screen can't cancel a past booking. */}
-                {b.status === "active" && (
-                  // Wraps rather than overflowing: three buttons don't fit
-                  // on one line at 320px.
-                  <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                    <Btn size="sm" variant="ghost" testId={TID.bookingExtend} onClick={() => extendBooking(b)}>+1 hour</Btn>
-                    <Btn size="sm" variant="outline" testId={TID.bookingCancel} onClick={() => cancelBooking(b)}>Cancel</Btn>
-                    <Btn
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => window.open(`https://www.openstreetmap.org/directions?to=${b.spot.lat},${b.spot.lng}`, "_blank", "noopener")}
-                    >
-                      Directions
-                    </Btn>
+                {b.paid_via && (
+                  <div data-testid={TID.bookingPaidVia} style={{ fontSize: 12, color: COLORS.textSecondary, marginTop: 2 }}>
+                    Paid with {b.paid_via}
                   </div>
                 )}
+                {/* The owner's check-in. Worth surfacing on the card: it is
+                    the one thing about an active booking that changes
+                    without the driver doing anything. */}
+                {b.arrived_at && (
+                  <div style={{ fontSize: 12, color: COLORS.textBrand, fontWeight: 600, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                    <Icon name="check" size={13} color={COLORS.textBrand} /> Arrival confirmed by the owner
+                  </div>
+                )}
+                {/* The pass is available for as long as the booking is, not
+                    just on the confirmation screen — cancelled included, so
+                    a disputed booking can still be shown. */}
+                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                  <Btn size="sm" variant="secondary" testId={TID.bookingShowPass} onClick={() => setPassBooking(b)}>
+                    Show pass
+                  </Btn>
+                  {/* Only an active booking can be changed; the server
+                      enforces this too, so a stale screen can't cancel a
+                      past booking. Wraps rather than overflowing: four
+                      buttons don't fit on one line at 320px. */}
+                  {b.status === "active" && (
+                    <>
+                      <Btn size="sm" variant="ghost" testId={TID.bookingExtend} onClick={() => extendBooking(b)}>+1 hour</Btn>
+                      <Btn size="sm" variant="outline" testId={TID.bookingCancel} onClick={() => cancelBooking(b)}>Cancel</Btn>
+                      <Btn
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => window.open(`https://www.openstreetmap.org/directions?to=${b.spot.lat},${b.spot.lng}`, "_blank", "noopener")}
+                      >
+                        Directions
+                      </Btn>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           ))}
@@ -1978,7 +2267,9 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
           </div>
           <Row testId={TID.profileRow} icon="user" label="Edit profile" value={user.phone || "No phone number"} onClick={() => setSheet("profile")} />
           <Row testId={TID.profileRow} icon="car" label="My vehicles" onClick={() => setSheet("vehicles")} />
-          <Row testId={TID.profileRow} icon="cash" label="Payment methods" onClick={() => setSheet("cards")} />
+          {/* No "Payment methods" row: nothing is saved to manage. Payment
+              is entered during booking and only a label survives on the
+              booking itself. */}
           <Row testId={TID.profileRow} icon="settings" label="Settings" value={`${prefs.radiusM / 1000} km radius · ${prefs.units}`} onClick={() => setSheet("settings")} />
           <Row testId={TID.profileRow} icon="shield" label="Safety and privacy" onClick={() => setSheet("safety")} />
           <div style={{ marginTop: 24 }}><Btn variant="danger" full testId={TID.signOut} onClick={onLogout}><Icon name="logout" size={18} color="white" /> Sign out</Btn></div>
@@ -1990,7 +2281,7 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
           beat the desktop media query that groups the items centrally. */}
       <div className="ps-tabbar" data-testid={TID.tabBar} style={{ position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", paddingTop: 8, borderTop: `1px solid ${COLORS.g200}`, background: COLORS.white, zIndex: Z.tabBar, boxShadow: "0 -2px 12px rgba(13,27,42,0.06)" }}>
         {tabs.map(t => (
-          <button key={t.id} onClick={() => { setTab(t.id); if (t.id === "home") setScreen("home"); }} data-testid={TAB_TEST_IDS[t.id]} style={{
+          <button key={t.id} onClick={() => { setTab(t.id); setScreen("home"); }} data-testid={TAB_TEST_IDS[t.id]} style={{
             display: "flex", flexDirection: "column", alignItems: "center", gap: 2, border: "none", background: "transparent", cursor: "pointer", padding: "4px 12px",
             // The tab bar sits on white, where mint is 1.9:1 — the active
             // label was the least readable text in the app.
@@ -2019,7 +2310,6 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
         />
       )}
       {sheet === "vehicles" && <VehiclesSheet token={token} onClose={() => setSheet(null)} />}
-      {sheet === "cards" && <CardsSheet token={token} onClose={() => setSheet(null)} />}
       {sheet === "settings" && (
         <SettingsSheet
           prefs={prefs}
@@ -2030,6 +2320,11 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
       )}
       {sheet === "safety" && (
         <SafetySheet user={user} onClose={() => setSheet(null)} onSignOut={onLogout} />
+      )}
+      {/* Not part of `sheet`: the pass is opened from a specific booking
+          row, so it carries that booking rather than a bare name. */}
+      {passBooking && (
+        <BookingPassSheet booking={passBooking} onClose={() => setPassBooking(null)} />
       )}
       {confirmDialog}
     </div>
@@ -2332,6 +2627,12 @@ export default function App() {
   // kick you out and there's no signed-out flash before it loads.
   const [session, setSession] = useState(api.loadSession);
   const [authNotice, setAuthNotice] = useState("");
+  // Set when the page was opened by scanning a booking's QR code. Read
+  // from the URL on first render rather than in an effect, so a scan never
+  // flashes the sign-in screen on its way to the pass.
+  const [passToken, setPassToken] = useState(
+    () => new URLSearchParams(window.location.search).get("pass") ?? ""
+  );
 
   const handleLogin = (s) => { api.saveSession(s); setSession(s); };
   const handleLogout = () => { api.clearSession(); setSession(null); };
@@ -2373,6 +2674,25 @@ export default function App() {
 
     return () => { cancelled = true; };
   }, []);
+
+  // Ahead of the sign-in gate on purpose. A scanned pass has to render for
+  // whoever is holding the phone, account or not — the server decides how
+  // much of the booking they see. Signing in is only needed to confirm an
+  // arrival, and the owner will already have a session for that.
+  if (passToken) {
+    return (
+      <PassScreen
+        passToken={passToken}
+        authToken={session?.token}
+        onExit={() => {
+          // Drop the parameter as we leave, so Back and reload land on the
+          // app rather than replaying the scan.
+          window.history.replaceState({}, "", window.location.pathname);
+          setPassToken("");
+        }}
+      />
+    );
+  }
 
   if (!session) return <AuthScreen onLogin={handleLogin} notice={authNotice} onDismissNotice={() => setAuthNotice("")} />;
 
