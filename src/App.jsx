@@ -2326,6 +2326,7 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
       {passBooking && (
         <BookingPassSheet booking={passBooking} onClose={() => setPassBooking(null)} />
       )}
+      {confirmDialog}
     </div>
   );
 };

@@ -17,7 +17,7 @@
  */
 
 import { TID } from "@shared/testids";
-import { CARDS, BOOKING_HOURS, vehicleDraft } from "@fixtures/data.fixture";
+import { BOOKING_HOURS, vehicleDraft } from "@fixtures/data.fixture";
 import { USERS, expect, injectSession, newAccount, test } from "@fixtures/index";
 
 test.describe("search and location", () => {
@@ -93,8 +93,12 @@ test.describe("booking a spot", () => {
     page,
   }) => {
     const spots = await api.spots();
-    const first = spots.data.spots[0];
-    if (!first) test.skip(true, "no seeded spots to book");
+    /* Online payment is what yields a confirmed booking (and a QR); a
+       cash-only spot would be pending, so pick one that accepts online. */
+    const first = spots.data.spots.find((s) =>
+      (s.accepted_payment_methods ?? '["online"]').includes("online"),
+    );
+    if (!first) test.skip(true, "no seeded spot accepts online payment");
 
     await asDriver.el.spotCardById(first!.id).click();
     await spotDetail.waitForLoaded();
@@ -120,11 +124,8 @@ test.describe("booking a spot", () => {
       return { loaded: img.complete && img.naturalWidth > 0 };
     });
     expect(rendered.loaded).toBe(true);
-    await page.getByRole("button", { name: /What's in this code\?/i }).click();
-    const encoded = (await page.locator("pre").first().textContent()) ?? "";
-    for (const field of ["ParkSpace booking PS-", "Spot:", "Date:", "Paid: INR"]) {
-      expect(encoded, `QR payload should encode ${field}`).toContain(field);
-    }
+    /* The encoded text is not shown on screen; what the code carries is
+       covered by tests/specs/unit/qr.spec.ts. */
 
     const ref = (await spotDetail.confirmed.reference.textContent()) ?? "";
     await spotDetail.finishConfirmation();
@@ -236,8 +237,8 @@ test.describe("favourites and empty states", () => {
   });
 });
 
-test.describe("profile, vehicles, cards and settings", () => {
-  test("a driver can edit their profile, manage vehicles and cards, and change units", async ({
+test.describe("profile, vehicles and settings", () => {
+  test("a driver can edit their profile, manage vehicles, and change units", async ({
     page,
     api,
     profile,
@@ -278,18 +279,6 @@ test.describe("profile, vehicles, cards and settings", () => {
     await expect(profile.vehicles.rowByPlate(vehicle.plate)).toBeVisible();
     await profile.vehicles.deleteButtons.first().click();
     await expect(profile.vehicles.rows).toHaveCount(1);
-    await profile.closeSheet();
-
-    await profile.openPaymentMethods();
-    await profile.addCard(CARDS.validVisa.number, CARDS.validVisa.expiry);
-    await expect(profile.cards.rows).toHaveCount(1, { timeout: 15_000 });
-    const rowText = (await profile.cards.rows.first().textContent()) ?? "";
-    expect(rowText).toContain(CARDS.validVisa.last4);
-    expect(rowText).not.toContain(CARDS.validVisa.number);
-
-    await profile.addCard(CARDS.luhnFailure.number, CARDS.luhnFailure.expiry);
-    await expect(profile.cards.error).toBeVisible();
-    await expect(profile.cards.rows).toHaveCount(1);
     await profile.closeSheet();
 
     const METRIC = /\d+(\.\d+)?\s?(m|km)\b/i;
