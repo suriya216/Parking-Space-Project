@@ -79,6 +79,8 @@ export const TID = {
   searchSpotOption: "search-spot-option",
   searchPlaceOption: "search-place-option",
   searchPlacesEmpty: "search-places-empty",
+  searchRecentOption: "search-recent-option",
+  searchRecentClear: "search-recent-clear",
   filterButton: "filter-button",
   filterSheet: "filter-sheet",
   /* A range slider, not a number field — see setMaxPrice in
@@ -108,6 +110,12 @@ export const TID = {
   spotCardFavourite: "spot-card-favourite",
   spotsEmpty: "spots-empty",
   spotsError: "spots-error",
+  favouriteError: "favourite-error",
+  bookingsOffline: "bookings-offline",
+  bookingCashReceived: "booking-cash-received",
+  bookingsPaidNotice: "bookings-paid-notice",
+  tabBookingsBadge: "tab-bookings-badge",
+  ownerStatsError: "owner-stats-error",
   spotsRetry: "spots-retry",
 
   // ─── spot detail ──────────────────────────────────────

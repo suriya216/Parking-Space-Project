@@ -268,6 +268,14 @@ export class ApiClient {
     });
   }
 
+  confirmCashReceived(token: string, id: number) {
+    return this.call<{ booking: Booking }>(`/bookings/${id}`, {
+      method: "PATCH",
+      token,
+      body: { cashReceived: true },
+    });
+  }
+
   extendBooking(token: string, id: number, extendHours: number) {
     return this.call<{ booking: Booking }>(`/bookings/${id}`, {
       method: "PATCH",

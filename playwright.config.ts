@@ -88,6 +88,10 @@ export default defineConfig({
     screenshot: IS_CI ? "on" : "only-on-failure",
     video: FULL_VIDEO ? "on" : IS_CI ? "retain-on-failure" : "off",
     testIdAttribute: "data-testid",
+    /* page.route() cannot see requests a service worker answers, so the
+       specs that stub the network would silently stop working. Blocked by
+       default; the offline spec turns it back on for itself. */
+    serviceWorkers: "block",
   },
 
   projects: [

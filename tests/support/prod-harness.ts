@@ -40,16 +40,18 @@ export interface ProdEnvironment {
   stop: () => void;
 }
 
-export const startProdServer = async (): Promise<ProdEnvironment> => {
+export const startProdServer = async (
+  { port = PROD_PORT, dataDir = PROD_DATA_DIR }: { port?: number; dataDir?: string } = {},
+): Promise<ProdEnvironment> => {
   const secret = randomBytes(48).toString("base64url");
-  rmSync(PROD_DATA_DIR, { recursive: true, force: true });
+  rmSync(dataDir, { recursive: true, force: true });
 
   const server: ChildProcess = spawn(process.execPath, ["server/index.js"], {
     env: {
       ...process.env,
       NODE_ENV: "production",
-      PORT: String(PROD_PORT),
-      DATA_DIR: PROD_DATA_DIR,
+      PORT: String(port),
+      DATA_DIR: dataDir,
       SESSION_SECRET: secret,
       DEMO_MODE: "false",
     },
@@ -62,7 +64,7 @@ export const startProdServer = async (): Promise<ProdEnvironment> => {
 
   /* 127.0.0.1 rather than localhost: on Windows the latter can resolve to
      ::1 first and miss a server bound to IPv4. */
-  const base = `http://127.0.0.1:${PROD_PORT}`;
+  const base = `http://127.0.0.1:${port}`;
 
   const request: ProdEnvironment["request"] = (path, opts = {}) =>
     fetch(base + path, {

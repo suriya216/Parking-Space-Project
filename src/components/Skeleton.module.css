@@ -1,0 +1,67 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.block {
+  background: linear-gradient(
+    90deg,
+    var(--ps-color-g100) 25%,
+    var(--ps-color-g200) 50%,
+    var(--ps-color-g100) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--ps-radius-sm);
+}
+
+.thumb {
+  width: 68px;
+  height: 56px;
+  border-radius: var(--ps-radius-md);
+  flex-shrink: 0;
+}
+
+.text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.line {
+  height: 12px;
+}
+
+.short {
+  width: 55%;
+}
+
+/* Announced by screen readers, invisible on screen. Also keeps a plain-text
+   label in the DOM for anything that waits on it. */
+.label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .block {
+    animation: none;
+  }
+}

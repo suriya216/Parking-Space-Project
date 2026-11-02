@@ -1,0 +1,13 @@
+{
+  "name": "ParkSpace",
+  "short_name": "ParkSpace",
+  "description": "Find and book parking near you.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0D1B2A",
+  "theme_color": "#0D1B2A",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

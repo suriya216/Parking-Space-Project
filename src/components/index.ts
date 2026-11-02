@@ -25,5 +25,8 @@ export type {
 export { Row } from "./Row";
 export type { RowProps } from "./Row";
 
+export { Skeleton } from "./Skeleton";
+export type { SkeletonProps } from "./Skeleton";
+
 export { ScreenHeader } from "./ScreenHeader";
 export type { ScreenHeaderProps } from "./ScreenHeader";

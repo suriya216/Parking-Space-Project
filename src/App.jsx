@@ -21,6 +21,7 @@ import {
   ScreenHeader,
   Select,
   Sheet,
+  Skeleton,
 } from "./components";
 import { useBackGuard } from "./hooks/useBackGuard";
 import { useGeolocation } from "./hooks/useGeolocation";
@@ -40,7 +41,15 @@ const SearchBox = ({ value, onChange, spots, units, onPickSpot, onPickPlace }) =
   const [open, setOpen] = useState(false);
   const [places, setPlaces] = useState([]);
   const [loadingPlaces, setLoadingPlaces] = useState(false);
+  const [recent, setRecent] = useState(prefsLib.loadRecentPlaces);
   const boxRef = useRef(null);
+
+  // Remembered as soon as a place is chosen, then handed on as before.
+  const pickPlace = (p) => {
+    setRecent(prefsLib.addRecentPlace(p));
+    onPickPlace(p);
+    setOpen(false);
+  };
 
   const q = value.trim().toLowerCase();
 
@@ -70,6 +79,7 @@ const SearchBox = ({ value, onChange, spots, units, onPickSpot, onPickPlace }) =
   }, []);
 
   const hasContent = spotMatches.length > 0 || places.length > 0 || loadingPlaceholder(q, loadingPlaces);
+  const showRecent = open && q.length === 0 && recent.length > 0;
   const showDrop = open && q.length > 0 && hasContent;
 
   return (
@@ -97,6 +107,43 @@ const SearchBox = ({ value, onChange, spots, units, onPickSpot, onPickPlace }) =
           </button>
         )}
       </div>
+
+      {showRecent && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0,
+          background: COLORS.white, borderRadius: 12, boxShadow: "0 8px 28px rgba(13,27,42,0.18)",
+          overflow: "hidden", maxHeight: 320, overflowY: "auto",
+        }}>
+          <div style={{ padding: "8px 12px 4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: COLORS.textTertiary, letterSpacing: 0.4 }}>RECENT SEARCHES</span>
+            <button
+              onClick={() => { prefsLib.clearRecentPlaces(); setRecent([]); }}
+              data-testid={TID.searchRecentClear}
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, color: COLORS.blue, fontFamily: fontB, padding: "6px 4px" }}
+            >
+              Clear
+            </button>
+          </div>
+          {recent.map(p => (
+            <button
+              key={`r${p.id}`}
+              onClick={() => pickPlace(p)}
+              data-testid={TID.searchRecentOption}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+                background: "none", border: "none", borderBottom: `1px solid ${COLORS.g100}`,
+                cursor: "pointer", textAlign: "left", fontFamily: fontB, minHeight: 44,
+              }}
+            >
+              <Icon name="clock" size={16} color={COLORS.textTertiary} />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: COLORS.navy, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                <span style={{ display: "block", fontSize: 11, color: COLORS.textSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.label}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {showDrop && (
         <div data-testid={TID.searchDropdown} style={{
@@ -141,12 +188,12 @@ const SearchBox = ({ value, onChange, spots, units, onPickSpot, onPickPlace }) =
             <div data-testid={TID.searchPlacesEmpty} style={{ padding: "10px 12px", fontSize: 12, color: COLORS.textTertiary }}>No matching places.</div>
           )}
           {q.length < 3 && places.length === 0 && !loadingPlaces && (
-            <div style={{ padding: "10px 12px", fontSize: 12, color: COLORS.textTertiary }}>Keep typing to search places…</div>
+            <div style={{ padding: "10px 12px", fontSize: 12, color: COLORS.textTertiary }}>Type at least 3 letters to search places</div>
           )}
           {places.map(p => (
             <button
               key={`p${p.id}`}
-              onClick={() => { onPickPlace(p); setOpen(false); }}
+              onClick={() => pickPlace(p)}
               data-testid={TID.searchPlaceOption}
               style={{
                 width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
@@ -180,9 +227,9 @@ const LocationPanel = ({
   onToggleScope, onRetryGps, onStartPicking, onCancelPicking, onClearManual,
 }) => {
   // minHeight keeps these comfortably tappable on a phone; 24px-tall
-  // pills were well under the ~40px guidance.
+  // pills were well under the ~44px guidance.
   const pill = {
-    padding: "9px 12px", minHeight: 40, borderRadius: 99, border: `1px solid ${COLORS.g300}`,
+    padding: "9px 12px", minHeight: 44, borderRadius: 99, border: `1px solid ${COLORS.g300}`,
     background: COLORS.white, fontFamily: fontB, fontSize: 12, fontWeight: 600,
     color: COLORS.blue, cursor: "pointer", whiteSpace: "nowrap",
   };
@@ -282,8 +329,8 @@ const SpotCard = ({ spot, onClick, units = "km", isFavourite, onToggleFavourite 
               marginLeft: "auto", background: "none", border: "none", cursor: "pointer",
               lineHeight: 1, flexShrink: 0,
               // Padded out to a 40px tap area without growing the glyph.
-              width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center",
-              margin: "-8px -8px -8px auto",
+              width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center",
+              margin: "-10px -10px -10px auto",
             }}
           >
             <span style={{ fontSize: 16, filter: isFavourite ? "none" : "grayscale(1)", opacity: isFavourite ? 1 : 0.35 }}>
@@ -345,11 +392,11 @@ const DetailScreen = ({ spot, onBack, onBook, units = "km", defaultHours = 2, is
           Back
         </button>
         <div style={{ position: "absolute", top: 16, right: 16, display: "flex", gap: 8 }}>
-          <button onClick={share} aria-label="Share this spot" style={{ width: 40, height: 40, borderRadius: "50%", background: "rgba(13,27,42,0.55)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <button onClick={share} aria-label="Share this spot" style={{ width: 44, height: 44, borderRadius: "50%", background: "rgba(13,27,42,0.55)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Icon name="share" size={18} color="white" />
           </button>
           {onToggleFavourite && (
-            <button onClick={() => onToggleFavourite(spot)} aria-label={isFavourite ? "Remove from saved" : "Save this spot"} data-testid={TID.detailFavourite} style={{ width: 40, height: 40, borderRadius: "50%", background: "rgba(13,27,42,0.55)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17 }}>
+            <button onClick={() => onToggleFavourite(spot)} aria-label={isFavourite ? "Remove from saved" : "Save this spot"} data-testid={TID.detailFavourite} style={{ width: 44, height: 44, borderRadius: "50%", background: "rgba(13,27,42,0.55)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17 }}>
               {isFavourite ? "❤️" : "🤍"}
             </button>
           )}
@@ -435,9 +482,9 @@ const DetailScreen = ({ spot, onBack, onBook, units = "km", defaultHours = 2, is
         <div style={{ marginTop: 20 }}>
           <label style={{ fontSize: 13, fontWeight: 600, color: COLORS.g700, display: "block", marginBottom: 8 }}>Duration (hours)</label>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <button onClick={() => setHours(Math.max(1, hours - 1))} aria-label="Decrease duration" data-testid={TID.detailHoursDecrease} style={{ width: 40, height: 40, borderRadius: 10, border: `1.5px solid ${COLORS.g300}`, background: "white", fontSize: 20, cursor: "pointer" }}>−</button>
+            <button onClick={() => setHours(Math.max(1, hours - 1))} aria-label="Decrease duration" data-testid={TID.detailHoursDecrease} style={{ width: 44, height: 44, borderRadius: 10, border: `1.5px solid ${COLORS.g300}`, background: "white", fontSize: 20, cursor: "pointer" }}>−</button>
             <span data-testid={TID.detailHours} style={{ fontFamily: fontD, fontSize: 28, fontWeight: 700, color: COLORS.navy, minWidth: 40, textAlign: "center" }}>{hours}</span>
-            <button onClick={() => setHours(Math.min(12, hours + 1))} aria-label="Increase duration" data-testid={TID.detailHoursIncrease} style={{ width: 40, height: 40, borderRadius: 10, border: `1.5px solid ${COLORS.g300}`, background: "white", fontSize: 20, cursor: "pointer" }}>+</button>
+            <button onClick={() => setHours(Math.min(12, hours + 1))} aria-label="Increase duration" data-testid={TID.detailHoursIncrease} style={{ width: 44, height: 44, borderRadius: 10, border: `1.5px solid ${COLORS.g300}`, background: "white", fontSize: 20, cursor: "pointer" }}>+</button>
             <span style={{ fontSize: 13, color: COLORS.textSecondary }}>₹{spot.price} × {hours}h + 10% fee</span>
           </div>
         </div>
@@ -850,7 +897,7 @@ const ConfirmScreen = ({ booking, onDone }) => {
         onClick={onDone}
         aria-label="Close and return to spots"
         style={{
-          position: "absolute", top: 14, right: 14, width: 38, height: 38, borderRadius: "50%",
+          position: "absolute", top: 14, right: 14, width: 44, height: 44, borderRadius: "50%",
           background: "rgba(255,255,255,0.9)", border: "none", cursor: "pointer",
           display: "flex", alignItems: "center", justifyContent: "center",
         }}
@@ -900,7 +947,7 @@ const ConfirmScreen = ({ booking, onDone }) => {
       <div style={{ marginBottom: 16 }}>
         <Notice tone="info">
           {isCashPending
-            ? "You'll receive a notification once the owner confirms the cash payment."
+            ? "Pay the owner in cash. When they confirm it, you'll see a notice on your Bookings tab."
             : "This pass stays in your Bookings tab — open it any time with \"Show pass\"."}
         </Notice>
       </div>
@@ -1082,7 +1129,7 @@ const VehiclesSheet = ({ token, onClose }) => {
       testId={TID.vehiclesSheet}
       footer={<Btn full size="lg" testId={TID.vehicleAdd} onClick={add}>Add vehicle</Btn>}>
       {err && <Notice>{err}</Notice>}
-      {loading && <div style={{ color: COLORS.textTertiary, fontSize: 14, padding: "8px 0" }}>Loading…</div>}
+      {loading && <Skeleton rows={2} label="Loading…" />}
       {!loading && list.length === 0 && (
         <div data-testid={TID.vehiclesEmpty} style={{ color: COLORS.textSecondary, fontSize: 13, marginBottom: 14 }}>No vehicles saved yet.</div>
       )}
@@ -1095,7 +1142,7 @@ const VehiclesSheet = ({ token, onClose }) => {
           label={v.label}
           value={`${v.plate} · ${v.type}`}
           right={
-            <button onClick={() => remove(v)} aria-label={`Remove ${v.label}`} data-testid={TID.vehicleDelete} style={{ background: "none", border: "none", cursor: "pointer", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <button onClick={() => remove(v)} aria-label={`Remove ${v.label}`} data-testid={TID.vehicleDelete} style={{ background: "none", border: "none", cursor: "pointer", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               <Icon name="x" size={15} color={COLORS.textTertiary} />
             </button>
           }
@@ -1500,7 +1547,22 @@ const OwnerDashboard = ({ user, token, onLogout }) => {
 
   const [earnings, setEarnings] = useState(null);
   const [bookings, setBookings] = useState([]);
+  const [statsErr, setStatsErr] = useState("");
   const { confirm, dialog: confirmDialog } = useConfirm();
+
+  // The driver is told once this is recorded, so ask first: it says money
+  // changed hands.
+  const confirmCash = (b) => {
+    confirm({
+      title: "Cash received?",
+      message: `Confirm you were paid ₹${b.total} in cash by ${b.user.name} for ${b.ref}.`,
+      confirmLabel: "Yes, cash received",
+      action: async () => {
+        const d = await api.confirmCashReceived(token, b.id);
+        setBookings(prev => prev.map(x => x.id === d.booking.id ? d.booking : x));
+      },
+    });
+  };
 
   const loadSpots = useCallback(() => {
     let cancelled = false;
@@ -1510,11 +1572,11 @@ const OwnerDashboard = ({ user, token, onLogout }) => {
     // Real revenue and real bookings against this owner's spots, replacing
     // the hard-coded figures that used to sit in the header.
     api.getOwnerEarnings(token)
-      .then(d => { if (!cancelled) setEarnings(d); })
-      .catch(() => {});
+      .then(d => { if (!cancelled) { setEarnings(d); setStatsErr(""); } })
+      .catch(e => { if (!cancelled) setStatsErr(e.message); });
     api.getBookings(token)
       .then(d => { if (!cancelled) setBookings(d.bookings); })
-      .catch(() => {});
+      .catch(e => { if (!cancelled) setStatsErr(e.message); });
     return () => { cancelled = true; };
   }, [token]);
 
@@ -1572,6 +1634,11 @@ const OwnerDashboard = ({ user, token, onLogout }) => {
       </div>
 
       <div style={{ padding: 20 }}>
+        {statsErr && (
+          <div role="alert" data-testid={TID.ownerStatsError} style={{ background: "#FFEBEE", color: COLORS.textError, padding: "12px 14px", borderRadius: 10, fontSize: 13, marginBottom: 12 }}>
+            Couldn't load your earnings and bookings. {statsErr}
+          </div>
+        )}
         {activeTab === "dashboard" && (
           <>
             <div style={{ fontFamily: fontD, fontSize: 16, fontWeight: 600, color: COLORS.navy, marginBottom: 12 }}>
@@ -1607,6 +1674,16 @@ const OwnerDashboard = ({ user, token, onLogout }) => {
                         </Btn>
                       </div>
                     )
+                  )}
+                  {/* Cash is only ever handed over in person, so the owner
+                      is the one who records it. */}
+                  {b.payment_status === "pending" && b.status !== "cancelled" && (
+                    <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <Badge color="orange">Cash pending</Badge>
+                      <Btn size="sm" variant="outline" testId={TID.bookingCashReceived} onClick={() => confirmCash(b)}>
+                        Cash received
+                      </Btn>
+                    </div>
                   )}
                 </div>
                 <div style={{ fontFamily: fontD, fontWeight: 700, color: b.status === "cancelled" ? COLORS.textTertiary : COLORS.textSuccess, fontSize: 15 }}>
@@ -1764,6 +1841,15 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
   const [favourites, setFavourites] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [bookingsErr, setBookingsErr] = useState("");
+  // True when the list came from the copy saved on this device because the
+  // network was unreachable.
+  const [bookingsOffline, setBookingsOffline] = useState(false);
+  const [favNotice, setFavNotice] = useState("");
+  useEffect(() => {
+    if (!favNotice) return;
+    const t = setTimeout(() => setFavNotice(""), 3500);
+    return () => clearTimeout(t);
+  }, [favNotice]);
   const [sheet, setSheet] = useState(null); // filter | profile | vehicles | settings | safety
   // The booking whose QR pass is open, so it survives leaving the
   // confirmation screen.
@@ -1790,13 +1876,66 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
       .catch(() => setFavourites([]));
   }, [token]);
 
+  // References of cash bookings the owner has confirmed since the driver
+  // last looked at the Bookings tab.
+  const [paidNotices, setPaidNotices] = useState([]);
+  const userId = user.id;
+
+  // Compares a fresh list against the cash bookings that were unpaid last
+  // time, and raises a notice for any that have since been confirmed.
+  const trackCashPayments = useCallback((list) => {
+    const before = new Set(prefsLib.loadPendingCash(userId));
+    const paid = list.filter(b => before.has(b.id) && b.payment_status === "confirmed" && b.status !== "cancelled");
+    if (paid.length) {
+      setPaidNotices(prev => [...prev, ...paid.map(b => b.ref).filter(r => !prev.includes(r))]);
+    }
+    const stillPending = list.filter(b => b.payment_status === "pending" && b.status === "active").map(b => b.id);
+    const inList = new Set(list.map(b => b.id));
+    // Anything the list settled one way or the other is no longer waiting.
+    prefsLib.savePendingCash(userId, [...before].filter(id => !inList.has(id)).concat(stillPending));
+  }, [userId]);
+
   const loadBookings = useCallback(() => {
     api.getBookings(token)
-      .then(d => { setBookings(d.bookings); setBookingsErr(""); })
+      .then(d => {
+        setBookings(d.bookings);
+        setBookingsErr("");
+        setBookingsOffline(Boolean(d.fromCache));
+        // A saved copy says nothing new about payments.
+        if (!d.fromCache) trackCashPayments(d.bookings);
+      })
       .catch(e => setBookingsErr(e.message));
-  }, [token]);
+  }, [token, trackCashPayments]);
 
   useEffect(() => { loadFavourites(); loadBookings(); }, [loadFavourites, loadBookings]);
+
+  // A booking made in this session is waiting on cash too, even though no
+  // fetch has seen it yet.
+  useEffect(() => {
+    const waiting = bookings.filter(b => b.payment_status === "pending" && b.status === "active").map(b => b.id);
+    if (!waiting.length) return;
+    const known = prefsLib.loadPendingCash(userId);
+    const merged = [...new Set([...known, ...waiting])];
+    if (merged.length !== known.length) prefsLib.savePendingCash(userId, merged);
+  }, [bookings, userId]);
+
+  // While a cash payment is outstanding, look again now and then so the
+  // driver hears about it without having to pull to refresh.
+  const hasCashWaiting = bookings.some(b => b.payment_status === "pending" && b.status === "active");
+  useEffect(() => {
+    if (!hasCashWaiting) return;
+    const t = setInterval(() => {
+      if (document.visibilityState === "visible") loadBookings();
+    }, 30_000);
+    return () => clearInterval(t);
+  }, [hasCashWaiting, loadBookings]);
+
+  // The notice has been seen once the driver has been on the Bookings tab
+  // and left it.
+  useEffect(() => {
+    if (tab !== "bookings") return;
+    return () => setPaidNotices([]);
+  }, [tab]);
 
   const isFavourite = (spot) => favourites.includes(spot.id);
 
@@ -1812,6 +1951,7 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
       setFavourites(d.favourites);
     } catch {
       setFavourites(prev => adding ? prev.filter(id => id !== spot.id) : [...prev, spot.id]);
+      setFavNotice(adding ? "Couldn't save this spot. Please try again." : "Couldn't remove this spot. Please try again.");
     }
   };
 
@@ -1986,6 +2126,14 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
 
   return (
     <div className="ps-screen-h" data-testid={TID.driverHome} style={{ display: "flex", flexDirection: "column", background: COLORS.white, fontFamily: fontB }}>
+      {favNotice && (
+        <div role="status" data-testid={TID.favouriteError} style={{
+          position: "fixed", left: 16, right: 16, bottom: 88, zIndex: Z.modal,
+          background: COLORS.navy, color: COLORS.white, padding: "12px 14px", borderRadius: 10, fontSize: 13,
+        }}>
+          {favNotice}
+        </div>
+      )}
       {tab === "home" && (
         <>
           <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column" }}>
@@ -2008,7 +2156,11 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
                 picking={picking}
                 onPickLocation={setManualLocation}
               />
-              {/* ps-map-chrome caps the width on desktop — a single search
+            </div>
+              {/* Outside the isolated map pane on purpose: inside it, the
+                  suggestion dropdown stacked beneath the spot sheet and its
+                  Places section was hidden.
+                  ps-map-chrome caps the width on desktop — a single search
                   input stretched across 1920px looks broken. */}
               <div className="ps-map-chrome" style={{ position: "absolute", top: 16, left: 16, right: 16, display: "flex", gap: 10, zIndex: Z.mapChrome }}>
                 <SearchBox
@@ -2037,7 +2189,6 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
                   )}
                 </button>
               </div>
-            </div>
             <div className="ps-spot-sheet" data-testid={TID.spotList} style={{ flex: 1, overflow: "auto", background: COLORS.white, borderRadius: "24px 24px 0 0", marginTop: -24, position: "relative", zIndex: Z.sheet, padding: "20px 16px 88px" }}>
               <div className="ps-sheet-handle" style={{ width: 40, height: 4, background: COLORS.g300, borderRadius: 4, margin: "0 auto 16px" }} />
 
@@ -2050,7 +2201,7 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {["all", "Covered", "Open"].map(f => (
                     <button key={f} onClick={() => setFilterType(f)} style={{
-                      padding: "10px 14px", minHeight: 40, borderRadius: 99, border: "none", fontSize: 12, fontWeight: 600, fontFamily: fontB,
+                      padding: "10px 14px", minHeight: 44, borderRadius: 99, border: "none", fontSize: 12, fontWeight: 600, fontFamily: fontB,
                       background: filterType === f ? COLORS.navy : COLORS.g100, color: filterType === f ? COLORS.white : COLORS.g600, cursor: "pointer",
                     }}>{f === "all" ? "All" : f}</button>
                   ))}
@@ -2085,7 +2236,7 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
                 </div>
               )}
               {loadingSpots && spots.length === 0 && !spotsErr && (
-                <div style={{ textAlign: "center", padding: 40, color: COLORS.textTertiary, fontSize: 14 }}>Loading parking spots…</div>
+                <Skeleton rows={4} label="Loading parking spots…" />
               )}
               {filtered.map(s => (
                 <SpotCard
@@ -2138,6 +2289,20 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
             action={<Btn size="sm" variant="ghost" onClick={loadBookings}>Refresh</Btn>}
           />
           {bookingsErr && <Notice>{bookingsErr}</Notice>}
+          {paidNotices.length > 0 && (
+            <div data-testid={TID.bookingsPaidNotice} role="status">
+              <Notice tone="success">
+                The owner confirmed your cash payment for {paidNotices.map(r => `#${r}`).join(", ")}.
+              </Notice>
+            </div>
+          )}
+          {bookingsOffline && (
+            <div data-testid={TID.bookingsOffline}>
+              <Notice tone="info">
+                You're offline. Showing the bookings last saved on this device, which may be out of date.
+              </Notice>
+            </div>
+          )}
           {bookings.map(b => (
             <div key={b.id} data-testid={TID.bookingCard} {...record(RECORD_ATTR.booking, b.id)} style={{ display: "flex", gap: 12, padding: 16, borderRadius: 14, border: `1px solid ${COLORS.g200}`, marginBottom: 12, background: COLORS.white }}>
               <img src={b.spot.photo} alt={b.spot.name} loading="lazy" style={{ width: 68, height: 56, borderRadius: 10, objectFit: "cover", flexShrink: 0, background: COLORS.g100 }} />
@@ -2282,12 +2447,20 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
       <div className="ps-tabbar" data-testid={TID.tabBar} style={{ position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", paddingTop: 8, borderTop: `1px solid ${COLORS.g200}`, background: COLORS.white, zIndex: Z.tabBar, boxShadow: "0 -2px 12px rgba(13,27,42,0.06)" }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => { setTab(t.id); setScreen("home"); }} data-testid={TAB_TEST_IDS[t.id]} style={{
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 2, border: "none", background: "transparent", cursor: "pointer", padding: "4px 12px",
+            position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, border: "none", background: "transparent", cursor: "pointer", padding: "4px 12px",
             // The tab bar sits on white, where mint is 1.9:1 — the active
             // label was the least readable text in the app.
             color: tab === t.id ? COLORS.textBrand : COLORS.textTertiary, fontFamily: fontB, fontSize: 10, fontWeight: tab === t.id ? 600 : 400,
           }}>
             <Icon name={t.icon} size={22} color={tab === t.id ? COLORS.textBrand : COLORS.textTertiary} />
+            {t.id === "bookings" && paidNotices.length > 0 && tab !== "bookings" && (
+              <span
+                data-testid={TID.tabBookingsBadge}
+                role="status"
+                aria-label="Cash payment confirmed"
+                style={{ position: "absolute", top: 2, right: 14, width: 10, height: 10, borderRadius: "50%", background: COLORS.textError, border: "2px solid white" }}
+              />
+            )}
             {t.label}
           </button>
         ))}
@@ -2498,7 +2671,7 @@ const AdminDashboard = ({ user, token, onLogout }) => {
               data-testid={TID.adminUserSearch}
             />
             {loading && users.length === 0 && (
-              <div style={{ textAlign: "center", padding: 40, color: COLORS.textTertiary, fontSize: 14 }}>Loading users…</div>
+              <Skeleton rows={4} label="Loading users…" />
             )}
             {!loading && users.length > 0 && filteredUsers.length === 0 && (
               <div data-testid={TID.adminUsersEmpty} style={{ textAlign: "center", padding: 40, color: COLORS.textTertiary, fontSize: 14 }}>
@@ -2565,7 +2738,7 @@ const AdminDashboard = ({ user, token, onLogout }) => {
               data-testid={TID.adminSpotSearch}
             />
             {loading && spots.length === 0 && (
-              <div style={{ textAlign: "center", padding: 40, color: COLORS.textTertiary, fontSize: 14 }}>Loading listings…</div>
+              <Skeleton rows={4} label="Loading listings…" />
             )}
             {!loading && spots.length > 0 && filteredSpots.length === 0 && (
               <div data-testid={TID.adminSpotsEmpty} style={{ textAlign: "center", padding: 40, color: COLORS.textTertiary, fontSize: 14 }}>

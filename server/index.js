@@ -731,7 +731,22 @@ app.patch("/api/bookings/:id", requireUser, handler((req, res) => {
     return res.status(403).json({ error: "Not your booking." });
   }
 
-  const { status, extendHours } = req.body ?? {};
+  const { status, extendHours, cashReceived } = req.body ?? {};
+
+  // Only the person who is owed the cash can say it arrived; the driver
+  // confirming their own payment would defeat the point.
+  if (cashReceived === true) {
+    if (!privileged) {
+      return res.status(403).json({ error: "Only the owner of this parking spot can confirm a cash payment." });
+    }
+    if (booking.status === "cancelled") {
+      return res.status(409).json({ error: "This booking was cancelled." });
+    }
+    if (booking.payment_status !== "pending") {
+      return res.status(409).json({ error: "There is no cash payment waiting to be confirmed." });
+    }
+    return res.json({ booking: db.confirmCashPayment(id) });
+  }
 
   if (extendHours != null) {
     const extra = Number(extendHours);
@@ -757,7 +772,7 @@ app.patch("/api/bookings/:id", requireUser, handler((req, res) => {
     return res.json({ booking: db.setBookingStatus(id, status) });
   }
 
-  res.status(400).json({ error: "Provide either status or extendHours." });
+  res.status(400).json({ error: "Provide status, extendHours or cashReceived." });
 }));
 
 // ─── BOOKING PASS (what the QR code opens) ──────────────
@@ -1122,6 +1137,12 @@ if (existsSync(join(DIST_DIR, "index.html"))) {
     immutable: true,
     maxAge: "1y",
   }));
+  // The service worker script must always be revalidated: a copy cached for
+  // an hour would delay every release reaching installed clients.
+  app.get("/sw.js", (_req, res) => {
+    res.set("Cache-Control", "no-cache");
+    res.sendFile(join(DIST_DIR, "sw.js"));
+  });
   app.use(express.static(DIST_DIR, { index: false, maxAge: "1h" }));
 
   // SPA fallback: every non-API path returns the shell so client-side
