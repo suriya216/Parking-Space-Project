@@ -1,7 +1,7 @@
 // User preferences, persisted locally. These are real settings that change
 // how the app behaves, not decorative toggles.
 
-import type { LatLng, Units } from "@shared/models";
+import type { LatLng, Place, Units } from "@shared/models";
 
 export interface Prefs {
   /** "nearby" search radius, in metres. */
@@ -42,6 +42,66 @@ export const load = (): Prefs => {
 export const save = (prefs: Prefs): Prefs => {
   localStorage.setItem(KEY, JSON.stringify(prefs));
   return prefs;
+};
+
+// ─── RECENT PLACE SEARCHES ──────────────────────────────
+// The places a driver picked from the search box, newest first, so a
+// repeat search is one tap. Storage can be unavailable (private window,
+// blocked site data), in which case this quietly remembers nothing.
+const RECENT_KEY = "parkspace.recentPlaces";
+const RECENT_MAX = 5;
+
+export const loadRecentPlaces = (): Place[] => {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    const list: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? (list as Place[]).slice(0, RECENT_MAX) : [];
+  } catch {
+    return [];
+  }
+};
+
+export const addRecentPlace = (place: Place): Place[] => {
+  const next = [place, ...loadRecentPlaces().filter((p) => p.id !== place.id)].slice(0, RECENT_MAX);
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    /* not persisted; still shown for this session */
+  }
+  return next;
+};
+
+export const clearRecentPlaces = (): void => {
+  try {
+    localStorage.removeItem(RECENT_KEY);
+  } catch {
+    /* nothing to clear */
+  }
+};
+
+// ─── CASH BOOKINGS AWAITING THE OWNER ───────────────────
+// Ids of this driver's cash bookings that were still unpaid the last time
+// they looked, so the app can tell when one flips to paid. Kept per user,
+// and kept across reloads, so a driver who closes the app and comes back
+// still hears about it.
+const pendingCashKey = (userId: number | string) => `parkspace.cashPending.${userId}`;
+
+export const loadPendingCash = (userId: number | string): number[] => {
+  try {
+    const raw = localStorage.getItem(pendingCashKey(userId));
+    const list: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter((n): n is number => typeof n === "number") : [];
+  } catch {
+    return [];
+  }
+};
+
+export const savePendingCash = (userId: number | string, ids: number[]): void => {
+  try {
+    localStorage.setItem(pendingCashKey(userId), JSON.stringify(ids));
+  } catch {
+    /* not persisted; still tracked for this session */
+  }
 };
 
 /** Distance formatting respects the chosen unit. */

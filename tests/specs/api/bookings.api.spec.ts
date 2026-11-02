@@ -219,3 +219,43 @@ test.describe("favourites", () => {
     expect(removed.data.favourites).toHaveLength(0);
   });
 });
+
+test.describe("PATCH /api/bookings/:id (cash received)", () => {
+  /* Arrival and cash confirmation are scoped to the owner of the specific
+     spot, so book the seeded owner's own listing. */
+  const arrange = async (api: Parameters<Parameters<typeof test>[2]>[0]["api"]) => {
+    const driver = await api.loginOrThrow(USERS.driver.email, USERS.driver.password);
+    const owner = await api.loginOrThrow(USERS.owner.email, USERS.owner.password);
+    const spot = (await api.spots()).data.spots.find((s) => s.name === "Lakshmi Residency");
+    expect(spot, "seeded spot must exist").toBeDefined();
+    const created = await api.createBooking(driver.token, { spotId: spot!.id, hours: 1 });
+    return { driver, owner, booking: created.data.booking };
+  };
+
+  test("a cash booking starts pending and only the spot's owner can confirm it", async ({ api }) => {
+    const { driver, owner, booking } = await arrange(api);
+    expect(booking.payment_status).toBe("pending");
+
+    /* The driver cannot vouch for their own payment. */
+    const self = await api.confirmCashReceived(driver.token, booking.id);
+    expect(self.status).toBe(403);
+
+    const confirmed = await api.confirmCashReceived(owner.token, booking.id);
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.data.booking.payment_status).toBe("confirmed");
+
+    /* Confirming twice is refused rather than silently repeated. */
+    const again = await api.confirmCashReceived(owner.token, booking.id);
+    expect(again.status).toBe(409);
+
+    await api.cancelBooking(driver.token, booking.id);
+  });
+
+  test("a cancelled booking cannot be confirmed as paid", async ({ api }) => {
+    const { driver, owner, booking } = await arrange(api);
+    await api.cancelBooking(driver.token, booking.id);
+
+    const res = await api.confirmCashReceived(owner.token, booking.id);
+    expect(res.status).toBe(409);
+  });
+});

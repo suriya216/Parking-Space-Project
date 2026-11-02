@@ -105,6 +105,12 @@ const request = async <T>(path: string, opts: RequestOptions = {}): Promise<T> =
     );
   }
 
+  // The service worker marks a response it served from its saved copy
+  // because the network was unreachable.
+  if (res.headers.get("X-Offline-Cache")) {
+    (data as { fromCache?: boolean }).fromCache = true;
+  }
+
   return data;
 };
 
@@ -244,7 +250,9 @@ export const changePassword = (
   request("/me/password", { method: "POST", token, body: { currentPassword, newPassword } });
 
 // ─── BOOKINGS ───────────────────────────────────────────
-export const getBookings = (token: string): Promise<{ bookings: Booking[] }> =>
+export const getBookings = (
+  token: string,
+): Promise<{ bookings: Booking[]; fromCache?: boolean }> =>
   request("/bookings", { token });
 
 // The date and time window are derived server-side from `startAt`
@@ -286,6 +294,13 @@ export const cancelBooking = (
   id: number,
 ): Promise<{ booking: Booking }> =>
   request(`/bookings/${id}`, { method: "PATCH", token, body: { status: "cancelled" } });
+
+/** Owner only: record that the cash for this booking was handed over. */
+export const confirmCashReceived = (
+  token: string,
+  id: number,
+): Promise<{ booking: Booking }> =>
+  request(`/bookings/${id}`, { method: "PATCH", token, body: { cashReceived: true } });
 
 export const extendBooking = (
   token: string,
@@ -424,8 +439,22 @@ export const deleteUser = (token: string, id: number): Promise<{ ok: boolean }> 
 // ─── SESSION PERSISTENCE ────────────────────────────────
 // Keeps you signed in across reloads. The token is unsigned in dev, so
 // this is a convenience only — see the note in server/index.js.
-export const saveSession = (session: Session): void =>
+// The service worker keeps a copy of the signed-in user's bookings so the
+// pass opens offline. That copy belongs to one person, so it is deleted
+// whenever the signed-in user changes.
+const OFFLINE_API_CACHE = "ps-api-v1";
+const purgeOfflineData = (): void => {
+  try {
+    void globalThis.caches?.delete(OFFLINE_API_CACHE);
+  } catch {
+    /* no Cache API here — nothing was saved */
+  }
+};
+
+export const saveSession = (session: Session): void => {
+  purgeOfflineData();
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+};
 
 export const loadSession = (): Session | null => {
   try {
@@ -436,4 +465,7 @@ export const loadSession = (): Session | null => {
   }
 };
 
-export const clearSession = (): void => localStorage.removeItem(SESSION_KEY);
+export const clearSession = (): void => {
+  purgeOfflineData();
+  localStorage.removeItem(SESSION_KEY);
+};

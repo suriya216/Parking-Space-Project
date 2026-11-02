@@ -518,6 +518,17 @@ export const markBookingArrived = (id, byUserId) => {
   return findBooking(id);
 };
 
+/**
+ * Records that the owner has been handed the cash for a booking. Only a
+ * cash booking is ever 'pending', so this can't touch an online payment.
+ */
+export const confirmCashPayment = (id) => {
+  db.prepare(
+    "UPDATE bookings SET payment_status = 'confirmed' WHERE id = ? AND payment_status = 'pending'"
+  ).run(id);
+  return findBooking(id);
+};
+
 export const setBookingStatus = (id, status) => {
   db.prepare("UPDATE bookings SET status = ? WHERE id = ?").run(status, id);
   return findBooking(id);

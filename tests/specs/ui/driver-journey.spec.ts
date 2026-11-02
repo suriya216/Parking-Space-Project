@@ -82,6 +82,37 @@ test.describe("search and location", () => {
     await asDriver.clearPinnedLocation();
     await expect(asDriver.el.pinMarker).toHaveCount(0, { timeout: 20_000 });
   });
+
+  test("a place that was searched for is offered again as a recent search, and can be cleared", async ({
+    asDriver,
+    page,
+  }) => {
+    /* Stubbed so the test doesn't depend on the live geocoder. */
+    await page.route("**/api/places**", (route) =>
+      route.fulfill({
+        json: {
+          places: [
+            { id: "p1", name: "Mylapore", label: "Mylapore, Chennai", lat: 13.0339, lng: 80.2619 },
+          ],
+        },
+      }),
+    );
+
+    await expect(asDriver.el.searchInput).toBeVisible();
+    await asDriver.el.searchInput.focus();
+    await expect(asDriver.el.recentOptions).toHaveCount(0);
+
+    await asDriver.searchAndAwaitSuggestions("mylapore");
+    await asDriver.pickPlaceSuggestion(0);
+    await expect(asDriver.el.searchInput).toHaveValue("");
+
+    await asDriver.el.searchInput.focus();
+    await expect(asDriver.el.recentOptions).toHaveCount(1);
+    await expect(asDriver.el.recentOptions.first()).toContainText("Mylapore");
+
+    await asDriver.el.recentClear.click();
+    await expect(asDriver.el.recentOptions).toHaveCount(0);
+  });
 });
 
 test.describe("booking a spot", () => {

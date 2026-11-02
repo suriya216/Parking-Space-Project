@@ -27,6 +27,8 @@ export const driverHomeLocators = (page: Page) => ({
   spotSuggestions: page.getByTestId(TID.searchSpotOption),
   placeSuggestions: page.getByTestId(TID.searchPlaceOption),
   placesEmpty: page.getByTestId(TID.searchPlacesEmpty),
+  recentOptions: page.getByTestId(TID.searchRecentOption),
+  recentClear: page.getByTestId(TID.searchRecentClear),
 
   filterButton: page.getByTestId(TID.filterButton),
 
@@ -112,6 +114,8 @@ export const bookingsLocators = (page: Page) => ({
   showPass: page.getByTestId(TID.bookingShowPass),
   paidVia: page.getByTestId(TID.bookingPaidVia),
   empty: page.getByTestId(TID.bookingsEmpty),
+  paidNotice: page.getByTestId(TID.bookingsPaidNotice),
+  tabBadge: page.getByTestId(TID.tabBookingsBadge),
 });
 
 /** The driver's own copy of the pass, re-opened from a booking row. */
