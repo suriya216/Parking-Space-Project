@@ -42,7 +42,7 @@ Never put it in the Dockerfile or commit it to git.
 | ---------------- | --------------------------------------- |
 | `NODE_ENV`       | `production`                            |
 | `PORT`           | `3001`                                  |
-| `SESSION_SECRET` | `A1xf_dHta68g_Th-M_Tk8W_zs-TO1gdOfWMHIwFSOEdJxofGlX-iWm4LGzSf7s6Y`                  |
+| `SESSION_SECRET` | `<value from step 1>`                  |
 | `DEMO_MODE`      | `true` (demo accounts) or `false`       |
 
 5. Optionally set the health check path to `/api/health`.
