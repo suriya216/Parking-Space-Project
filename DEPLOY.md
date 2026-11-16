@@ -56,7 +56,23 @@ https://parking-space-project-1.onrender.com/api/health
 
 ---
 
-## 3. Optional: Google/GitHub sign-in
+## 3. Password-reset email (Brevo)
+
+"Forgot password" emails a one-time link (valid 30 minutes). Set these
+under **Environment** in Render. Never put them in the repo:
+
+| Key              | Value                                                        |
+| ---------------- | ------------------------------------------------------------ |
+| `EMAIL_API_KEY`  | Brevo API key (SMTP & API → API Keys)                        |
+| `EMAIL_FROM`     | a sender you verified in Brevo, e.g. `ParkSpace <you@gmail.com>` |
+| `APP_PUBLIC_URL` | `https://parking-space-project-1.onrender.com`               |
+
+`APP_PUBLIC_URL` is what the emailed link points at. Without the key,
+production sends nothing and the reset request still reports success.
+
+---
+
+## 4. Optional: Google/GitHub sign-in
 
 See `.env.example` for how to obtain the credentials. Add these as
 environment variables in Render:

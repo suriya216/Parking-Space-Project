@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import * as apple from "./apple.js";
 import * as db from "./db.js";
+import * as mailer from "./mailer.js";
 import * as oauth from "./oauth.js";
 import * as payments from "./payments.js";
 import * as session from "./session.js";
@@ -289,18 +290,92 @@ app.post("/api/register", rateLimitAuth, handler((req, res) => {
   res.status(201).json({ user: publicUser(user), token: tokenFor(user) });
 }));
 
-// Simulated password reset. There is no mail server wired up, so this
-// deliberately does NOT send anything and does NOT change the password;
-// it only confirms the address exists in a non-enumerable way.
+// ─── PASSWORD RESET ─────────────────────────────────────
+// 1. POST /api/password-reset          email -> emails a one-time link
+// 2. GET  /api/password-reset/:token   is the link still good?
+// 3. POST /api/password-reset/confirm  token + new password -> done
+// The app then returns the user to the sign-in screen.
+
+// Where the emailed link points. Never taken from the request's Host
+// header: that is attacker-controlled, and a poisoned link would deliver
+// the reset token to the attacker's site.
+const appBaseUrl = () => {
+  const url = process.env.APP_PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL
+    ?? (IS_PROD ? null : "http://localhost:5173");
+  return url ? url.replace(/\/+$/, "") : null;
+};
+
+const resetEmail = ({ name, link }) => {
+  const minutes = db.RESET_TTL_MINUTES;
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  return {
+    subject: "Reset your ParkSpace password",
+    text:
+      `Hi ${name},\n\nWe got a request to reset your ParkSpace password. ` +
+      `Open this link to choose a new one (it expires in ${minutes} minutes):\n\n${link}\n\n` +
+      `If you didn't ask for this, you can ignore this email; your password stays the same.`,
+    html:
+      `<p>Hi ${esc(name)},</p>` +
+      `<p>We got a request to reset your ParkSpace password. ` +
+      `Click the button to choose a new one. The link expires in ${minutes} minutes.</p>` +
+      `<p><a href="${esc(link)}" style="display:inline-block;padding:12px 20px;background:#0d1b2a;color:#fff;border-radius:8px;text-decoration:none">Reset password</a></p>` +
+      `<p style="color:#555;font-size:13px">Or paste this into your browser:<br>${esc(link)}</p>` +
+      `<p style="color:#555;font-size:13px">If you didn't ask for this, ignore this email; your password stays the same.</p>`,
+  };
+};
+
 app.post("/api/password-reset", rateLimitAuth, handler((req, res) => {
-  const { email } = req.body ?? {};
+  const email = String(req.body?.email ?? "").trim();
   if (!email) return res.status(400).json({ error: "Email is required." });
+
+  // The same answer whether or not the address has an account, and sent
+  // before any mail is attempted, so neither the body nor the response
+  // time says which addresses are registered.
   res.json({
-    simulated: true,
-    message: `If ${email} matches an account, a reset link would be sent there.`,
-    note: "Demo only — no email is sent and no password is changed.",
+    message: `If an account exists for ${email}, we've sent a link to reset its password. It expires in ${db.RESET_TTL_MINUTES} minutes.`,
   });
+
+  const base = appBaseUrl();
+  if (!base) {
+    console.error("[mail] password reset skipped: set APP_PUBLIC_URL so the emailed link has somewhere to point.");
+    return;
+  }
+  const reset = db.createPasswordReset(email);
+  if (!reset) return;
+  mailer
+    .sendMail({ to: email, ...resetEmail({ name: reset.name, link: `${base}/?reset=${reset.token}` }) })
+    .catch((e) => console.error("[mail] password reset email failed:", e.message));
 }));
+
+app.get("/api/password-reset/:token", rateLimitAuth, handler((req, res) => {
+  res.json({ valid: db.isPasswordResetValid(req.params.token) });
+}));
+
+app.post("/api/password-reset/confirm", rateLimitAuth, handler((req, res) => {
+  const { token, password } = req.body ?? {};
+  if (!token || !password) {
+    return res.status(400).json({ error: "A reset link and a new password are required." });
+  }
+  if (String(password).length < 6) {
+    return res.status(400).json({ error: "Password must be at least 6 characters." });
+  }
+  if (!db.consumePasswordReset(token, String(password))) {
+    noteAuthFailure(req);
+    return res.status(400).json({ error: "This reset link is invalid or has expired. Request a new one." });
+  }
+  res.json({ ok: true, message: "Password updated. Sign in with your new password." });
+}));
+
+// Development only: read back the email a reset would have sent, so the
+// flow can be tested without a mail account. Absent in production, where
+// it would hand a reset token to anyone who asked.
+if (!IS_PROD) {
+  app.get("/api/dev/outbox", handler((req, res) => {
+    const message = mailer.lastCaptured(String(req.query.to ?? ""));
+    if (!message) return res.status(404).json({ error: "Nothing captured for that address." });
+    res.json(message);
+  }));
+}
 
 // POST /api/demo-sso used to live here: a stand-in that signed in the
 // seeded driver whenever the Google or Apple button was tapped. It made

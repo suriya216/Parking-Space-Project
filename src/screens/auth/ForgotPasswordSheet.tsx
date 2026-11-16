@@ -2,7 +2,6 @@ import { useState } from "react";
 
 import * as api from "../../api";
 import { Btn, Field, Notice, Sheet } from "../../components";
-import { cx } from "../../styles/cx";
 import { TID } from "@shared/testids";
 import type { PasswordResetResult } from "@shared/models";
 
@@ -14,8 +13,9 @@ export interface ForgotPasswordSheetProps {
 }
 
 /**
- * The server has no mail transport, so this reports a simulated result
- * instead of implying a real email went out.
+ * Step one of the reset flow: ask for an address and have the server email
+ * a link. The answer is the same whether or not the address has an
+ * account, so this screen can't be used to find out who is registered.
  */
 export const ForgotPasswordSheet = ({
   initialEmail,
@@ -63,12 +63,9 @@ export const ForgotPasswordSheet = ({
       {result ? (
         <div data-testid={TID.forgotResult}>
           <Notice tone="success">{result.message}</Notice>
-          <Notice tone="info">{result.note}</Notice>
-          <div className={s.explainer}>
-            To wire this up for real you'd add an email service (SES, Postmark,
-            Resend) plus a signed, expiring reset token — see the note on
-            <code className={cx(s.code, s.codeInline)}>/api/password-reset</code>
-            in <code className={s.code}>server/index.js</code>.
+          <div className={s.hint}>
+            Check your inbox, and your spam folder if it doesn't show up within
+            a minute or two.
           </div>
         </div>
       ) : (

@@ -213,6 +213,15 @@ export const deleteSpot = (token: string, id: number): Promise<{ ok: boolean }> 
 export const requestPasswordReset = (email: string): Promise<PasswordResetResult> =>
   request("/password-reset", { method: "POST", body: { email } });
 
+export const checkPasswordReset = async (token: string): Promise<boolean> =>
+  (await request<{ valid: boolean }>(`/password-reset/${encodeURIComponent(token)}`)).valid;
+
+export const confirmPasswordReset = (
+  token: string,
+  password: string,
+): Promise<{ ok: boolean; message: string }> =>
+  request("/password-reset/confirm", { method: "POST", body: { token, password } });
+
 // ─── OAUTH ──────────────────────────────────────────────
 // Which providers have credentials configured server-side. `demoSso` used
 // to live here and signed the seeded driver in for any provider; both

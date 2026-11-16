@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
@@ -748,6 +748,81 @@ export const countAdmins = () =>
 export const changePassword = (id, password) => {
   db.prepare("UPDATE users SET pass_hash = ? WHERE id = ?").run(hashPassword(password), id);
   return findUser(id);
+};
+
+// ─── PASSWORD RESET TOKENS ──────────────────────────────
+// Only a SHA-256 of the token is stored, so a copy of the database cannot
+// be turned into working reset links. Tokens are 256 random bits, which is
+// why a fast hash is fine here (unlike passwords).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS password_resets (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    email      TEXT NOT NULL COLLATE NOCASE,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    used_at    TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`);
+
+export const RESET_TTL_MINUTES = 30;
+// One email per address per minute, so the form cannot be used to flood
+// someone's inbox or burn through the mail quota.
+const RESET_COOLDOWN_SECONDS = 60;
+const hashToken = (token) => createHash("sha256").update(String(token)).digest("hex");
+
+/**
+ * Start a reset for an address. Returns `{ token, name }`, or null when no
+ * password-based account exists there (accounts that sign in through an
+ * identity provider have no password to reset). Any earlier unused link for
+ * the address is revoked, so only the newest email works.
+ */
+export const createPasswordReset = (email) => {
+  const account = db
+    .prepare("SELECT name FROM users WHERE email = ? COLLATE NOCASE AND provider = 'local' AND pass_hash <> ? ORDER BY id LIMIT 1")
+    .get(email, OAUTH_ONLY);
+  if (!account) return null;
+
+  const recent = db
+    .prepare("SELECT 1 FROM password_resets WHERE email = ? COLLATE NOCASE AND used_at IS NULL AND created_at > datetime('now', ?)")
+    .get(email, `-${RESET_COOLDOWN_SECONDS} seconds`);
+  if (recent) return null;
+
+  db.prepare("DELETE FROM password_resets WHERE expires_at < datetime('now') OR used_at IS NOT NULL").run();
+  db.prepare("UPDATE password_resets SET used_at = datetime('now') WHERE email = ? COLLATE NOCASE AND used_at IS NULL").run(email);
+
+  const token = randomBytes(32).toString("base64url");
+  db.prepare("INSERT INTO password_resets (email, token_hash, expires_at) VALUES (?, ?, datetime('now', ?))")
+    .run(email, hashToken(token), `+${RESET_TTL_MINUTES} minutes`);
+  return { token, name: account.name };
+};
+
+const findLiveReset = (token) =>
+  db.prepare("SELECT id, email FROM password_resets WHERE token_hash = ? AND used_at IS NULL AND expires_at > datetime('now')")
+    .get(hashToken(token));
+
+export const isPasswordResetValid = (token) => Boolean(findLiveReset(token));
+
+/**
+ * Spend a reset token and set the new password on every password-based
+ * account at that address (an address can hold one account per role).
+ * Returns false when the token is unknown, expired or already used.
+ */
+export const consumePasswordReset = (token, password) => {
+  const reset = findLiveReset(token);
+  if (!reset) return false;
+  const hash = hashPassword(password);
+  db.exec("BEGIN");
+  try {
+    db.prepare("UPDATE users SET pass_hash = ? WHERE email = ? COLLATE NOCASE AND provider = 'local' AND pass_hash <> ?")
+      .run(hash, reset.email, OAUTH_ONLY);
+    db.prepare("UPDATE password_resets SET used_at = datetime('now') WHERE id = ?").run(reset.id);
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+  return true;
 };
 
 export const listUsers = () =>

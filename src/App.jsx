@@ -30,7 +30,7 @@ import { useConfirm } from "./hooks/useConfirm";
 // (the read-only one on spot detail, and the add-spot location picker)
 // still compose react-leaflet directly, and reuse the price marker.
 import { MapView, priceIcon } from "./map";
-import { AuthScreen } from "./screens/auth";
+import { AuthScreen, ResetPasswordScreen } from "./screens/auth";
 
 // ─── SEARCH WITH SUGGESTIONS ────────────────────────────
 // Two kinds of suggestion, because they answer different questions:
@@ -2807,6 +2807,15 @@ export default function App() {
     () => new URLSearchParams(window.location.search).get("pass") ?? ""
   );
 
+  // Set when the page was opened from a password-reset email. Read from
+  // the URL on first render for the same reason as the pass token above.
+  const [resetToken, setResetToken] = useState(
+    () => new URLSearchParams(window.location.search).get("reset") ?? ""
+  );
+  // Shown on the sign-in screen after a reset, so the user lands there
+  // knowing it worked.
+  const [resetDone, setResetDone] = useState(false);
+
   const handleLogin = (s) => { api.saveSession(s); setSession(s); };
   const handleLogout = () => { api.clearSession(); setSession(null); };
 
@@ -2867,7 +2876,37 @@ export default function App() {
     );
   }
 
-  if (!session) return <AuthScreen onLogin={handleLogin} notice={authNotice} onDismissNotice={() => setAuthNotice("")} />;
+  // Also ahead of the sign-in gate: the emailed link must open the reset
+  // form whether or not a stale session is sitting in localStorage. When
+  // the reset finishes, any such session is dropped so the user lands on
+  // the sign-in screen and uses the new password.
+  if (resetToken) {
+    return (
+      <ResetPasswordScreen
+        token={resetToken}
+        onDone={(outcome) => {
+          window.history.replaceState({}, "", window.location.pathname);
+          if (outcome === "reset") {
+            api.clearSession();
+            setSession(null);
+            setResetDone(true);
+          }
+          setResetToken("");
+        }}
+      />
+    );
+  }
+
+  if (!session) {
+    return (
+      <AuthScreen
+        onLogin={handleLogin}
+        notice={authNotice}
+        onDismissNotice={() => setAuthNotice("")}
+        initialSuccess={resetDone ? "Password updated. Sign in with your new password." : undefined}
+      />
+    );
+  }
 
   const { user, token } = session;
   if (user.role === "admin") return <AdminDashboard user={user} token={token} onLogout={handleLogout} />;
