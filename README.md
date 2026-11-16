@@ -509,8 +509,8 @@ production. `specs/api/production.api.spec.ts` asserts it 404s there.
 
 ## Deploying
 
-See **[DEPLOY.md](DEPLOY.md)**. `Dockerfile` and `fly.toml` target
-Fly.io; in production Express serves the built `dist/` from a single
+See **[DEPLOY.md](DEPLOY.md)**. The `Dockerfile` is deployed on
+Render; in production Express serves the built `dist/` from a single
 origin with HSTS, CSP, `nosniff` and `X-Frame-Options: DENY`.
 
 `SESSION_SECRET` is mandatory — the server **refuses to start** without a
