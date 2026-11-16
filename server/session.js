@@ -40,7 +40,7 @@ const resolveSecret = () => {
     throw new Error(
       "SESSION_SECRET is required when NODE_ENV=production. Generate one with:\n" +
       "  node -e \"console.log(require('crypto').randomBytes(48).toString('base64url'))\"\n" +
-      "then set it on the host (e.g. `fly secrets set SESSION_SECRET=...`)."
+      "then set it on the host (e.g. as an environment variable in the Render dashboard)."
     );
   }
 

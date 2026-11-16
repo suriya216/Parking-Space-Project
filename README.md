@@ -7,9 +7,27 @@ React 19 + Vite on the front, Express 5 + `node:sqlite` on the back,
 Leaflet and OpenStreetMap for the map. Seeded with real Chennai locations,
 so distances and map placement are genuine.
 
+**Live demo:** https://parking-space-project-1.onrender.com/ (Render free
+tier: it sleeps when idle, so the first load can take up to a minute, and
+data resets on restart.)
+
+## Contents
+
+- [Getting started](#getting-started)
+- [Scripts](#scripts)
+- [Project structure](#project-structure)
+- [Styling](#styling)
+- [API reference](#api-reference)
+- [Testing](#testing)
+- [Quality gates and CI](#quality-gates-and-ci)
+- [Deploying](#deploying)
+- [Troubleshooting](#troubleshooting)
+
 ---
 
-## Prerequisites
+## Getting started
+
+### Prerequisites
 
 | | |
 |---|---|
@@ -19,9 +37,7 @@ so distances and map placement are genuine.
 No database to provision — SQLite lives at `server/parkspace.db` and is
 created and seeded automatically on first start.
 
----
-
-## Setup
+### Run it
 
 ```bash
 npm install
@@ -39,7 +55,7 @@ Open **http://localhost:5173**. Vite proxies `/api/*` to Express
 (`vite.config.js`), so there's no CORS setup and no API base URL in the
 client. Either half can be run alone with `npm run dev:api` / `npm run dev:web`.
 
-### Signing in
+#### Signing in
 
 Three accounts are seeded, one per role:
 
@@ -54,7 +70,7 @@ Passwords live in
 single source of truth for them, mirroring `SEED_USERS` in
 [server/db.js](server/db.js). They are deliberately not shown in the app.
 
-### Social sign-in (optional)
+#### Social sign-in (optional)
 
 Google, Apple and GitHub can run the real Authorization Code + PKCE flow,
 but need credentials to appear at all — a provider with none configured
@@ -70,7 +86,7 @@ including the exact redirect URI it needs. Apple is the fiddly one — it
 needs a paid developer account and an https tunnel for local dev; see the
 comments there and [server/apple.js](server/apple.js).
 
-### Resetting the data
+#### Resetting the data
 
 ```bash
 npm run db:reset
@@ -81,7 +97,7 @@ Clears anything added by testing or manual use and re-seeds from scratch
 
 ---
 
-## Common scripts
+## Scripts
 
 ```bash
 npm run dev            # API + web, with hot reload
@@ -94,10 +110,11 @@ npm run secret           # generate a SESSION_SECRET for deployment
 npm run typecheck       # tsc over the app and the test suite
 npm run lint             # oxlint + a UTF-8/mojibake check
 npm test                 # build, then the Playwright suite
+
+node scripts/db-query.mjs   # read-only viewer for the SQLite database
 ```
 
-Run `typecheck`, `lint`, `build` and `test` before pushing — CI runs the
-same four.
+Run `typecheck`, `lint`, `build` and `test` before pushing.
 
 ---
 
@@ -126,6 +143,7 @@ server/                   the API
   apple.js                Sign in with Apple — ES256 client secret, id_token
   session.js              signed session tokens
   reset.js                restore the demo dataset
+  payments.js             payment gateway (Razorpay live mode, or a local demo mode)
 
 shared/                   imported by BOTH the app and the tests
   models.ts               domain types (User, Spot, Booking, …)
@@ -141,9 +159,9 @@ tree, in TypeScript — new UI code should be `.tsx`.
 
 ---
 
-## Testing and deployment
+## Styling
 
-These have their own docs, since they're big enough to need them:
+Styles come in three layers, from most to least shared. File layout:
 
 ```
 src/styles/
@@ -230,6 +248,54 @@ genuine one-off.
 Adding a style? Ask in order: is the value shared → **token**; does it
 need `env()`, a media query or a fallback pair → **global**; otherwise →
 the component's **module**.
+
+---
+
+## API reference
+
+All under `/api`. Auth is `Authorization: Bearer <token>`.
+
+| Area | Endpoints |
+|---|---|
+Auth | `POST /login` `POST /register` `POST /password-reset` `GET /me` `PATCH /me` `POST /me/password` |
+OAuth | `GET /auth/providers` `GET /auth/:provider/start` `GET`+`POST /auth/:provider/callback` `POST /auth/exchange` |
+Spots | `GET /spots` `POST /spots` `PATCH /spots/:id` `DELETE /spots/:id` |
+Bookings | `GET /bookings` `POST /bookings` `PATCH /bookings/:id` |
+Booking pass | `GET /pass/:token` `POST /pass/:token/arrival` |
+Favourites | `GET /favourites` `PUT /favourites/:spotId` `DELETE /favourites/:spotId` |
+Vehicles | `GET /vehicles` `POST /vehicles` `DELETE /vehicles/:id` |
+Photos | `GET /spot-photos` `POST /spot-photos` `DELETE /spot-photos/:id` |
+Owner | `GET /owner/earnings` |
+Admin | `GET /users` `PATCH /users/:id` `DELETE /users/:id` `GET /stats` |
+Misc | `GET /places` `GET /health` |
+Payments | `POST /payments/order` `POST /payments/demo-complete` |
+Demo-only | `GET /demo-accounts` — 404 unless `DEMO_MODE` |
+
+`POST /bookings` takes payment in the same request — `payment` is either
+`{ mode: "card", number, exp }` or `{ mode: "upi", upiId }`. It is
+validated, reduced to a display label (`Visa ···· 4242`) stored on the
+booking, and discarded. Nothing reusable is kept, so there is no
+saved-card endpoint.
+
+`GET /pass/:token` is what a booking's QR code opens, and is the one route
+that answers without a session — whoever scanned the code is standing at
+the space. The response depends on who the caller is: the spot's owner
+(and the driver, and admins) get the driver's name, the payment label and
+`canConfirmArrival`; everyone else gets the parking details alone.
+`POST /pass/:token/arrival` records that the car turned up and is
+restricted to that spot's owner. The token is 128 random bits rather than
+the booking reference, which is only five digits and would be enumerable.
+
+`GET /spots` returns `distance: null` unless you pass `lat` and `lng`;
+with them it returns real haversine distances sorted nearest-first, and
+honours an optional `radius` in metres.
+
+The callback accepts both `GET` and `POST`: Google and GitHub redirect
+back with query params, Apple form-posts because requesting `name email`
+scope obliges `response_mode=form_post`.
+
+`GET /demo-accounts` is gated by `DEMO_MODE`, which defaults **off** in
+production. `specs/api/production.api.spec.ts` asserts it 404s there.
 
 ---
 
@@ -427,9 +493,10 @@ step-by-step timeline with DOM snapshots.
 
 ---
 
-## Quality gates
+## Quality gates and CI
 
-Run before pushing; CI should run the same four:
+Run before pushing. CI runs lint, typecheck and the Playwright suite
+(Playwright also runs weekly):
 
 ```bash
 npm run typecheck   # tsc over the app AND the suite, both strict
@@ -445,9 +512,7 @@ of `₹`, en/em dashes, `★`, `•` and `›`, so one bad round trip through a
 codepage-guessing tool silently corrupts the UI. If it reports a file,
 `node scripts/encoding-repair.mjs <file>` reverses it exactly.
 
----
-
-## Suggested loop for a change
+### Suggested loop for a change
 
 1. `npm run dev`, make the change.
 2. If you added UI: add the id to `shared/testids.ts`, render it via
@@ -460,58 +525,12 @@ codepage-guessing tool silently corrupts the UI. If it reports a file,
 
 ---
 
-## API reference
-
-All under `/api`. Auth is `Authorization: Bearer <token>`.
-
-| Area | Endpoints |
-|---|---|
-Auth | `POST /login` `POST /register` `POST /password-reset` `GET /me` `PATCH /me` `POST /me/password` |
-OAuth | `GET /auth/providers` `GET /auth/:provider/start` `GET`+`POST /auth/:provider/callback` `POST /auth/exchange` |
-Spots | `GET /spots` `POST /spots` `PATCH /spots/:id` `DELETE /spots/:id` |
-Bookings | `GET /bookings` `POST /bookings` `PATCH /bookings/:id` |
-Booking pass | `GET /pass/:token` `POST /pass/:token/arrival` |
-Favourites | `GET /favourites` `PUT /favourites/:spotId` `DELETE /favourites/:spotId` |
-Vehicles | `GET /vehicles` `POST /vehicles` `DELETE /vehicles/:id` |
-Photos | `GET /spot-photos` `POST /spot-photos` `DELETE /spot-photos/:id` |
-Owner | `GET /owner/earnings` |
-Admin | `GET /users` `PATCH /users/:id` `DELETE /users/:id` `GET /stats` |
-Misc | `GET /places` `GET /health` |
-Demo-only | `GET /demo-accounts` — 404 unless `DEMO_MODE` |
-
-`POST /bookings` takes payment in the same request — `payment` is either
-`{ mode: "card", number, exp }` or `{ mode: "upi", upiId }`. It is
-validated, reduced to a display label (`Visa ···· 4242`) stored on the
-booking, and discarded. Nothing reusable is kept, so there is no
-saved-card endpoint.
-
-`GET /pass/:token` is what a booking's QR code opens, and is the one route
-that answers without a session — whoever scanned the code is standing at
-the space. The response depends on who the caller is: the spot's owner
-(and the driver, and admins) get the driver's name, the payment label and
-`canConfirmArrival`; everyone else gets the parking details alone.
-`POST /pass/:token/arrival` records that the car turned up and is
-restricted to that spot's owner. The token is 128 random bits rather than
-the booking reference, which is only five digits and would be enumerable.
-
-`GET /spots` returns `distance: null` unless you pass `lat` and `lng`;
-with them it returns real haversine distances sorted nearest-first, and
-honours an optional `radius` in metres.
-
-The callback accepts both `GET` and `POST`: Google and GitHub redirect
-back with query params, Apple form-posts because requesting `name email`
-scope obliges `response_mode=form_post`.
-
-`GET /demo-accounts` is gated by `DEMO_MODE`, which defaults **off** in
-production. `specs/api/production.api.spec.ts` asserts it 404s there.
-
----
-
 ## Deploying
 
-See **[DEPLOY.md](DEPLOY.md)**. `Dockerfile` and `fly.toml` target
-Fly.io; in production Express serves the built `dist/` from a single
-origin with HSTS, CSP, `nosniff` and `X-Frame-Options: DENY`.
+Hosted on **Render** (free web service, Docker runtime) from the repo's
+`Dockerfile`; see **[DEPLOY.md](DEPLOY.md)** for the steps. In production
+Express serves the built `dist/` from a single origin with HSTS, CSP,
+`nosniff` and `X-Frame-Options: DENY`.
 
 `SESSION_SECRET` is mandatory — the server **refuses to start** without a
 strong one rather than falling back to a guessable key, because that

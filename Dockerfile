@@ -37,8 +37,7 @@ USER node
 
 EXPOSE 3001
 
-# Fly's health check hits /api/health; this also makes `docker ps` show
-# real status when run directly.
+# Makes `docker ps` show real status; hosts can also probe /api/health.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
