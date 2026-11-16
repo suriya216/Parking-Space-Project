@@ -182,6 +182,36 @@ export class ApiClient {
     });
   }
 
+  /**
+   * The email a reset would have sent, read back from the dev-only outbox
+   * (absent in production). Polled briefly because the server replies to
+   * the request before it builds the message.
+   */
+  async resetLinkFor(email: string): Promise<{ link: string; token: string }> {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const res = await this.call<{ text: string }>(
+        `/dev/outbox?to=${encodeURIComponent(email)}`,
+      );
+      if (res.ok) {
+        const link = /https?:\/\/\S+\?reset=[\w-]+/.exec(res.data.text)?.[0];
+        if (link) return { link, token: link.split("reset=")[1] as string };
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error(`no reset email was captured for ${email}`);
+  }
+
+  checkPasswordReset(token: string) {
+    return this.call<{ valid: boolean }>(`/password-reset/${encodeURIComponent(token)}`);
+  }
+
+  confirmPasswordReset(token: string, password: string) {
+    return this.call<{ ok: boolean; message: string }>("/password-reset/confirm", {
+      method: "POST",
+      body: { token, password },
+    });
+  }
+
   authProviders() {
     return this.call<AuthProviders>("/auth/providers");
   }

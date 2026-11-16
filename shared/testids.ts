@@ -49,6 +49,15 @@ export const TID = {
   forgotResult: "forgot-result",
   forgotError: "forgot-error",
 
+  // reset password (the page the emailed link opens)
+  resetScreen: "reset-screen",
+  resetPassword: "reset-password",
+  resetConfirm: "reset-confirm",
+  resetSubmit: "reset-submit",
+  resetError: "reset-error",
+  resetInvalid: "reset-invalid",
+  resetBack: "reset-back",
+
   // ─── app chrome ───────────────────────────────────────
   tabBar: "tab-bar",
   tabHome: "tab-home",

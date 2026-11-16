@@ -205,7 +205,7 @@ test.describe("password reset", () => {
     await expect(authPage.forgot.result).toHaveCount(0);
   });
 
-  test("reports a simulated result for a known address", async ({ authPage }) => {
+  test("confirms a reset email was requested for a known address", async ({ authPage }) => {
     await authPage.requestReset(USERS.driver.email);
     await expect(authPage.forgot.result).toBeVisible();
   });
@@ -215,5 +215,45 @@ test.describe("password reset", () => {
        same as the known-address one. */
     await authPage.requestReset("definitely-not-a-user@parkspace.test");
     await expect(authPage.forgot.result).toBeVisible();
+  });
+
+  test("the emailed link sets a new password and returns to sign-in", async ({
+    api,
+    authPage,
+    page,
+  }) => {
+    const account = newAccount("driver");
+    await api.registerOrThrow(account);
+
+    await authPage.requestReset(account.email);
+    await expect(authPage.forgot.result).toBeVisible();
+
+    const { token } = await api.resetLinkFor(account.email);
+    await authPage.openResetLink(token);
+
+    /* Validated locally before anything is sent. */
+    await authPage.chooseNewPassword("BrandNew@456", "Different@456");
+    await expect(authPage.reset.error).toContainText(/don.t match/i);
+
+    await authPage.chooseNewPassword("BrandNew@456");
+
+    /* Lands on the sign-in screen, not the app, and says it worked. */
+    await expect(authPage.el.screen).toBeVisible();
+    await expect(authPage.el.registered).toContainText(/password updated/i);
+    await expect(authPage.reset.screen).toHaveCount(0);
+
+    await authPage.signIn({ email: account.email, password: "BrandNew@456" });
+    await expect(page.getByTestId(TID.driverHome)).toBeVisible();
+  });
+
+  test("an expired or reused link says so instead of showing the form", async ({
+    authPage,
+  }) => {
+    await authPage.openResetLink("not-a-real-token");
+    await expect(authPage.reset.invalid).toBeVisible();
+    await expect(authPage.reset.password).toHaveCount(0);
+
+    await authPage.reset.back.click();
+    await expect(authPage.el.screen).toBeVisible();
   });
 });

@@ -211,7 +211,6 @@ export interface AuthProviders {
 
 export interface PasswordResetResult {
   message: string;
-  note: string;
 }
 
 export interface LatLng {

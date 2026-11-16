@@ -49,5 +49,15 @@ export const forgotPasswordLocators = (page: Page) => ({
   error: page.getByTestId(TID.forgotError),
 });
 
-export type AuthLocators = ReturnType<typeof authLocators>;
+export const resetPasswordLocators = (page: Page) => ({
+  screen: page.getByTestId(TID.resetScreen),
+  password: page.getByTestId(TID.resetPassword),
+  confirm: page.getByTestId(TID.resetConfirm),
+  submit: page.getByTestId(TID.resetSubmit),
+  error: page.getByTestId(TID.resetError),
+  invalid: page.getByTestId(TID.resetInvalid),
+  back: page.getByTestId(TID.resetBack),
+});
+
+export type AuthLocators =ReturnType<typeof authLocators>;
 export type ForgotPasswordLocators = ReturnType<typeof forgotPasswordLocators>;

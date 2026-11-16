@@ -257,7 +257,8 @@ All under `/api`. Auth is `Authorization: Bearer <token>`.
 
 | Area | Endpoints |
 |---|---|
-Auth | `POST /login` `POST /register` `POST /password-reset` `GET /me` `PATCH /me` `POST /me/password` |
+Auth | `POST /login` `POST /register` `GET /me` `PATCH /me` `POST /me/password` |
+Password reset | `POST /password-reset` (emails a link) `GET /password-reset/:token` `POST /password-reset/confirm` |
 OAuth | `GET /auth/providers` `GET /auth/:provider/start` `GET`+`POST /auth/:provider/callback` `POST /auth/exchange` |
 Spots | `GET /spots` `POST /spots` `PATCH /spots/:id` `DELETE /spots/:id` |
 Bookings | `GET /bookings` `POST /bookings` `PATCH /bookings/:id` |

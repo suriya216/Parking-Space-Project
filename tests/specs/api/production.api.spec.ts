@@ -136,6 +136,10 @@ test.describe("token forgery", () => {
 
 test.describe("demo shortcuts are gone in production", () => {
   test("the published test passwords are not served", async () => {
+    /* The password-reset outbox would hand out live reset links. */
+    const outbox = await prod.json<Record<string, unknown>>("/api/dev/outbox?to=driver@parkspace.test");
+    expect(outbox.status).toBe(404);
+
     const res = await prod.json<Record<string, unknown>>("/api/demo-accounts");
     expect(res.status).toBe(404);
     /* And nothing password-shaped leaked in the 404 body. */

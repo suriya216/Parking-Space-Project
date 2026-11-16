@@ -15,12 +15,14 @@ export interface AuthScreenProps {
   /** Surfaced from an OAuth round trip that came back with a problem. */
   notice?: string;
   onDismissNotice: () => void;
+  /** A success message to show on arrival, e.g. after a password reset. */
+  initialSuccess?: string;
 }
 
 type Mode = "login" | "register";
 type SelfServeRole = Extract<Role, "driver" | "owner">;
 
-export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps) => {
+export const AuthScreen = ({ onLogin, notice, onDismissNotice, initialSuccess }: AuthScreenProps) => {
   const [mode, setMode] = useState<Mode>("login");
   const [role, setRole] = useState<SelfServeRole>("driver");
   const [email, setEmail] = useState("");
@@ -30,7 +32,7 @@ export const AuthScreen = ({ onLogin, notice, onDismissNotice }: AuthScreenProps
   const [err, setErr] = useState("");
   /* Set after a successful registration, cleared as soon as the user edits
      the form or switches mode again. */
-  const [created, setCreated] = useState("");
+  const [created, setCreated] = useState(initialSuccess ?? "");
   const [busy, setBusy] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
   /* Set when one password turned out to open more than one of this

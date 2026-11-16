@@ -1,6 +1,10 @@
 import type { Page } from "@playwright/test";
 
-import { authLocators, forgotPasswordLocators } from "@locators/auth.locators";
+import {
+  authLocators,
+  forgotPasswordLocators,
+  resetPasswordLocators,
+} from "@locators/auth.locators";
 import type { NewAccount, TestUser } from "@fixtures/users.fixture";
 
 import { BasePage } from "./BasePage";
@@ -17,11 +21,13 @@ import { BasePage } from "./BasePage";
 export class AuthPage extends BasePage {
   readonly el: ReturnType<typeof authLocators>;
   readonly forgot: ReturnType<typeof forgotPasswordLocators>;
+  readonly reset: ReturnType<typeof resetPasswordLocators>;
 
   constructor(page: Page) {
     super(page);
     this.el = authLocators(page);
     this.forgot = forgotPasswordLocators(page);
+    this.reset = resetPasswordLocators(page);
   }
 
   async openSignIn(): Promise<void> {
@@ -129,6 +135,18 @@ export class AuthPage extends BasePage {
   async requestReset(email: string): Promise<void> {
     await this.forgot.email.fill(email);
     await this.forgot.submit.click();
+  }
+
+  /** Open the page an emailed reset link points at. */
+  async openResetLink(token: string): Promise<void> {
+    await this.page.goto(`/?reset=${encodeURIComponent(token)}`, { waitUntil: "domcontentloaded" });
+    await this.reset.screen.waitFor({ state: "visible" });
+  }
+
+  async chooseNewPassword(password: string, confirm = password): Promise<void> {
+    await this.reset.password.fill(password);
+    await this.reset.confirm.fill(confirm);
+    await this.reset.submit.click();
   }
 
   /**

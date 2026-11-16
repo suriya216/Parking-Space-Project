@@ -220,6 +220,82 @@ test.describe("POST /api/password-reset", () => {
     /* Same shape, so the response cannot be used to enumerate accounts. */
     expect(Object.keys(unknown.data).sort()).toEqual(Object.keys(known.data).sort());
   });
+
+  test("requires an email", async ({ api }) => {
+    const res = await api.requestPasswordReset("");
+    expect(res.status).toBe(400);
+  });
+});
+
+test.describe("password reset flow", () => {
+  /** A throwaway account, so a reset can't change a seeded password. */
+  const fresh = async (api: Parameters<Parameters<typeof test>[2]>[0]["api"]) => {
+    const account = newAccount("driver");
+    await api.registerOrThrow(account);
+    return account;
+  };
+
+  test("emails a one-time link that sets a new password", async ({ api }) => {
+    const account = await fresh(api);
+
+    expect((await api.requestPasswordReset(account.email)).status).toBe(200);
+    const { token } = await api.resetLinkFor(account.email);
+
+    expect((await api.checkPasswordReset(token)).data.valid).toBe(true);
+
+    const done = await api.confirmPasswordReset(token, "BrandNew@456");
+    expect(done.status).toBe(200);
+
+    expect((await api.login(account.email, "BrandNew@456")).status).toBe(200);
+    expect((await api.login(account.email, account.password)).status).toBe(401);
+  });
+
+  test("a link works once", async ({ api }) => {
+    const account = await fresh(api);
+    await api.requestPasswordReset(account.email);
+    const { token } = await api.resetLinkFor(account.email);
+
+    expect((await api.confirmPasswordReset(token, "FirstChange@1")).status).toBe(200);
+    const again = await api.confirmPasswordReset(token, "SecondChange@2");
+    expect(again.status).toBe(400);
+    expect((await api.checkPasswordReset(token)).data.valid).toBe(false);
+    /* The first password stands. */
+    expect((await api.login(account.email, "FirstChange@1")).status).toBe(200);
+  });
+
+  test("rejects unknown tokens and short passwords", async ({ api }) => {
+    expect((await api.checkPasswordReset("not-a-real-token")).data.valid).toBe(false);
+    expect((await api.confirmPasswordReset("not-a-real-token", "LongEnough@1")).status).toBe(400);
+
+    const account = await fresh(api);
+    await api.requestPasswordReset(account.email);
+    const { token } = await api.resetLinkFor(account.email);
+    expect((await api.confirmPasswordReset(token, "abc")).status).toBe(400);
+    /* A rejected password must not spend the link. */
+    expect((await api.checkPasswordReset(token)).data.valid).toBe(true);
+  });
+
+  test("one reset covers every account on the address", async ({ api }) => {
+    const driver = newAccount("driver");
+    await api.registerOrThrow(driver);
+    await api.registerOrThrow({ ...driver, role: "owner" });
+
+    await api.requestPasswordReset(driver.email);
+    const { token } = await api.resetLinkFor(driver.email);
+    await api.confirmPasswordReset(token, "SharedNew@789");
+
+    const res = await api.login(driver.email, "SharedNew@789");
+    expect(res.status).toBe(200);
+    expect(res.data).toMatchObject({ chooseRole: expect.arrayContaining(["driver", "owner"]) });
+    expect((await api.login(driver.email, driver.password)).status).toBe(401);
+  });
+
+  test("an address with no account gets no usable link", async ({ api }) => {
+    const email = `nobody-${Date.now()}@parkspace.test`;
+    expect((await api.requestPasswordReset(email)).status).toBe(200);
+    const res = await api.call(`/dev/outbox?to=${encodeURIComponent(email)}`);
+    expect(res.status).toBe(404);
+  });
 });
 
 test.describe("demo endpoints", () => {
