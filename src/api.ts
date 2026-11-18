@@ -79,7 +79,9 @@ const request = async <T>(path: string, opts: RequestOptions = {}): Promise<T> =
     // screen can do about it. Hand control to the app, which signs out and
     // returns to the login screen rather than leaving a broken page with
     // an error on it.
-    if (res.status === 401) {
+    // Only when a token was sent: a 401 from /login (no token) is a
+    // credentials failure and falls through to the server's own message.
+    if (res.status === 401 && token) {
       const message = "Your session has expired. Please sign in again.";
       unauthorizedHandler?.(message);
       throw new ApiError(message, { status: 401 });
