@@ -154,6 +154,19 @@ export default defineConfig({
       },
     },
 
+    /* Hand-run helpers, never part of the pipeline. The project only exists
+       when MANUAL=1 (set by `npm run test:register`), so a plain
+       `npx playwright test` cannot see these specs. */
+    ...(process.env.MANUAL
+      ? [
+          {
+            name: "manual",
+            testMatch: /specs\/manual\/.*\.spec\.ts$/,
+            use: { viewport: { width: 1440, height: 900 }, ...MOBILE_CONTEXT },
+          },
+        ]
+      : []),
+
     /* ── Wider matrix, opt-in ──────────────────────────────
        Four more profiles, each chosen because it lands on a different
        side of a breakpoint in src/styles/layout.css rather than just

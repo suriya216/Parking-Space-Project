@@ -21,6 +21,7 @@
     "test:ios": "playwright test --project=ios",
     "test:android": "playwright test --project=android",
     "test:desktop": "playwright test --project=desktop",
+    "test:register": "node scripts/test-register.mjs",
     "test:devices": "node scripts/test-devices.mjs",
     "test:headed": "playwright test --project=ios --headed",
     "test:debug": "playwright test --debug",
