@@ -1566,7 +1566,7 @@ const OwnerDashboard = ({ user, token, onLogout }) => {
 
   const loadSpots = useCallback(() => {
     let cancelled = false;
-    api.getSpots()
+    api.getSpots({}, token)
       .then(d => { if (!cancelled) { setSpots(d.spots); setSpotsErr(""); } })
       .catch(e => { if (!cancelled) setSpotsErr(e.message); });
     // Real revenue and real bookings against this owner's spots, replacing
@@ -2036,13 +2036,13 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
       lat: location?.lat,
       lng: location?.lng,
       radius: location && scope === "nearby" ? prefs.radiusM : undefined,
-    })
+    }, token)
       .then(d => { if (!cancelled) { setSpots(d.spots); setSpotsErr(""); } })
       .catch(e => { if (!cancelled) setSpotsErr(e.message); })
       .finally(() => { if (!cancelled) setLoadingSpots(false); });
 
     return () => { cancelled = true; };
-  }, [location, geoStatus, scope, prefs.radiusM, spotsReloadKey]);
+  }, [location, geoStatus, scope, prefs.radiusM, spotsReloadKey, token]);
 
   const center = location ?? FALLBACK_CENTER;
 
@@ -2534,7 +2534,7 @@ const AdminDashboard = ({ user, token, onLogout }) => {
       const [u, s, sp] = await Promise.all([
         api.listUsers(token),
         api.getStats(token),
-        api.getSpots(),
+        api.getSpots({}, token),
       ]);
       setUsers(u.users);
       setStats(s);

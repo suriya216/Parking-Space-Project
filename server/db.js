@@ -210,6 +210,13 @@ await execScript(`
     used_at    TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
+
+  -- Demo vs real. The seeded accounts and listings are demo data; anything a
+  -- real person registers or lists is not. Real accounts never see demo
+  -- listings. ALTER rather than a column in CREATE TABLE so a database that
+  -- already exists gains the flag.
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT false;
+  ALTER TABLE spots ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT false;
 `);
 
 // ─── PASSWORD HASHING (scrypt, from node:crypto) ────────
@@ -268,13 +275,20 @@ export const seed = async () => {
     if (await findAccount(u.email, u.role)) continue;
     users += (
       await query(
-        `INSERT INTO users (name, email, pass_hash, role)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO users (name, email, pass_hash, role, is_demo)
+         VALUES ($1, $2, $3, $4, true)
          ON CONFLICT (lower(email), role) DO NOTHING`,
         [u.name, u.email, hashPassword(u.password), u.role],
       )
     ).count;
   }
+
+  // Mark the seeded accounts as demo even when they already existed, which
+  // is the case for a database created before the flag.
+  await query(
+    "UPDATE users SET is_demo = true WHERE lower(email) || '|' || role = ANY($1::text[]) AND NOT is_demo",
+    [SEED_USERS.map((u) => `${u.email.toLowerCase()}|${u.role}`)],
+  );
 
   // ON CONFLICT against the (name, address) unique key keeps seeding
   // idempotent across restarts.
@@ -283,14 +297,19 @@ export const seed = async () => {
     spots += (
       await query(
         `INSERT INTO spots (name, address, type, vehicle, price, rating, reviews,
-                            verified, lat, lng, photo, owner, available, since, accepted_payment_methods)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                            verified, lat, lng, photo, owner, available, since, accepted_payment_methods, is_demo)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, true)
          ON CONFLICT (name, address) DO NOTHING`,
         [s.name, s.address, s.type, s.vehicle, s.price, s.rating, s.reviews, s.verified,
           s.lat, s.lng, s.photo, s.owner, s.available, s.since, s.acceptedPaymentMethods],
       )
     ).count;
   }
+
+  await query(
+    "UPDATE spots SET is_demo = true WHERE name = ANY($1::text[]) AND NOT is_demo",
+    [SEED_SPOTS.map((s) => s.name)],
+  );
 
   // Link seeded spots to the seeded owner account by matching display name,
   // so the owner dashboard shows a real listing it can manage.
@@ -363,8 +382,28 @@ export const distanceMeters = (a, b) => {
 
 const rowToSpot = (r) => ({ ...r, verified: Boolean(r.verified) });
 
-export const listSpots = async ({ lat, lng, radius } = {}) => {
-  const rows = (await all("SELECT * FROM spots ORDER BY id")).map(rowToSpot);
+// The test suites register throwaway accounts and then book the seeded
+// listings, so they run with this on. It is off by default, which is what
+// production and `npm run dev` use: real accounts never see demo listings.
+const DEMO_SPOTS_FOR_ALL = process.env.DEMO_SPOTS_FOR_ALL === "true";
+
+/**
+ * Whether `viewer` may see a spot. No viewer (a signed-out request) sees
+ * everything, which is how the public listing has always behaved. Seeded demo
+ * accounts and admins see everything too. A real account sees only real
+ * listings, never the seeded demo ones.
+ */
+export const canSeeSpot = (viewer, spot) => {
+  if (!viewer || viewer.is_demo || viewer.role === "admin" || DEMO_SPOTS_FOR_ALL) return true;
+  return !spot.is_demo;
+};
+
+export const listSpots = async ({ lat, lng, radius, viewer } = {}) => {
+  const hideDemo =
+    Boolean(viewer) && !viewer.is_demo && viewer.role !== "admin" && !DEMO_SPOTS_FOR_ALL;
+  const rows = (
+    await all(`SELECT * FROM spots ${hideDemo ? "WHERE NOT is_demo " : ""}ORDER BY id`)
+  ).map(rowToSpot);
 
   // No origin given: return every spot with no distance attached, so the
   // client can't mistake a missing distance for "0 m away".
@@ -388,8 +427,9 @@ export const findSpot = async (id) => {
 export const createSpot = async (s) => {
   const row = await one(
     `INSERT INTO spots (name, address, type, vehicle, price, rating, reviews,
-                        verified, lat, lng, photo, owner, available, since, created_by)
-     VALUES ($1, $2, $3, $4, $5, 0, 0, 0, $6, $7, $8, $9, $10, $11, $12)
+                        verified, lat, lng, photo, owner, available, since, created_by, is_demo)
+     VALUES ($1, $2, $3, $4, $5, 0, 0, 0, $6, $7, $8, $9, $10, $11, $12,
+             COALESCE((SELECT is_demo FROM users WHERE id = $12), false))
      RETURNING id`,
     [s.name, s.address, s.type, s.vehicle, s.price, s.lat, s.lng, s.photo,
       s.owner, s.available, new Date().getFullYear(), s.createdBy],

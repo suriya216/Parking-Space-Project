@@ -162,12 +162,17 @@ export const register = (payload: {
   request("/register", { method: "POST", body: payload });
 
 // Omitting lat/lng returns every spot with distance: null. Passing them
-// returns real haversine distances, sorted nearest-first.
-export const getSpots = ({
-  lat,
-  lng,
-  radius,
-}: { lat?: number; lng?: number; radius?: number } = {}): Promise<{ spots: Spot[] }> => {
+// returns real haversine distances, sorted nearest-first. Pass the session
+// token so the server knows who is asking: real accounts are not shown the
+// seeded demo listings.
+export const getSpots = (
+  {
+    lat,
+    lng,
+    radius,
+  }: { lat?: number; lng?: number; radius?: number } = {},
+  token?: string,
+): Promise<{ spots: Spot[] }> => {
   const q = new URLSearchParams();
   if (lat != null && lng != null) {
     q.set("lat", String(lat));
@@ -175,7 +180,7 @@ export const getSpots = ({
   }
   if (radius != null) q.set("radius", String(radius));
   const qs = q.toString();
-  return request(`/spots${qs ? `?${qs}` : ""}`);
+  return request(`/spots${qs ? `?${qs}` : ""}`, { token });
 };
 
 export const createSpot = (

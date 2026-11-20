@@ -261,6 +261,7 @@ export const startAppleEnvironment = async (): Promise<AppleEnvironment> => {
       PARKSPACE_DB: TEST_DB,
       /* Never the real database: the suite resets and deletes accounts. */
       DATABASE_URL: "",
+      DEMO_SPOTS_FOR_ALL: "true",
       APPLE_CLIENT_ID,
       APPLE_TEAM_ID,
       APPLE_KEY_ID,

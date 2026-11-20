@@ -224,6 +224,10 @@ export default defineConfig({
         /* Explicit rather than inherited: the demo-SSO and demo-accounts
            specs assert on behaviour that is gated by this flag. */
         DEMO_MODE: "true",
+        /* The suite registers fresh accounts and books the seeded spots, so
+           real accounts are let see them here. Production does not set this;
+           specs/api/production.api.spec.ts covers the hiding. */
+        DEMO_SPOTS_FOR_ALL: "true",
         NODE_ENV: "development",
         PORT: String(API_PORT),
         /* Throwaway database, isolated from server/parkspace.db. Both the

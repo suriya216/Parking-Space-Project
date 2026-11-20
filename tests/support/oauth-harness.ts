@@ -178,6 +178,7 @@ export const startOauthEnvironment = async (): Promise<OauthEnvironment> => {
       PARKSPACE_DB: TEST_DB,
       /* Never the real database: the suite resets and deletes accounts. */
       DATABASE_URL: "",
+      DEMO_SPOTS_FOR_ALL: "true",
       GOOGLE_CLIENT_ID: CLIENT_ID,
       GOOGLE_CLIENT_SECRET: CLIENT_SECRET,
       GOOGLE_AUTH_URL: `http://localhost:${IDP_PORT}/authorize`,
