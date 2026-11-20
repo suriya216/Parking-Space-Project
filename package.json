@@ -34,8 +34,10 @@
     "prod:local": "node scripts/prod-local.mjs"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.17",
     "express": "^5.2.1",
     "leaflet": "^1.9.4",
+    "pg": "^8.23.1",
     "qrcode": "^1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

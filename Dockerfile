@@ -1,5 +1,4 @@
-# Node 24: the server uses node:sqlite, which only exists from 22.5 and is
-# stable in 24. Pinned to a minor so a base-image bump can't silently
+# Node 24 (LTS). Pinned to a minor so a base-image bump can't silently
 # change the runtime.
 FROM node:24.4-slim AS build
 
@@ -17,7 +16,7 @@ RUN npm run build
 FROM node:24.4-slim AS runtime
 
 ENV NODE_ENV=production
-# All mutable state (SQLite database + uploaded photos) lives here so it
+# All mutable state (local PGlite database + uploaded photos; a deployment sets DATABASE_URL instead) lives here so it
 # can be a mounted volume and survive redeploys.
 ENV DATA_DIR=/data
 

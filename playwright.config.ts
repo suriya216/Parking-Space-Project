@@ -229,7 +229,11 @@ export default defineConfig({
         /* Throwaway database, isolated from server/parkspace.db. Both the
            reset and the server in the command above read it, and db.js
            creates the directory if it is missing. */
-        PARKSPACE_DB: "server/test-data/parkspace.db",
+        PARKSPACE_DB: "server/test-data/pgdata",
+        /* The suite resets and deletes accounts, so it must never inherit a
+           real DATABASE_URL from the shell or .env. Set, even if empty, wins
+           over --env-file. */
+        DATABASE_URL: "",
       },
     },
     {

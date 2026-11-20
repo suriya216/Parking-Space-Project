@@ -108,12 +108,15 @@ npm run prod:local        # http://localhost:3002
 
 ## Limitations of the free tier
 
-- **Data is not persistent.** The free plan has no disk, so the SQLite
-  database and uploaded photos reset on every restart or redeploy.
+- **Set `DATABASE_URL` or data is lost.** The free plan has no disk, so
+  without a hosted Postgres every restart or redeploy wipes registered users.
+  Create a free database (Neon works well), then add its connection string to
+  the service's Environment as `DATABASE_URL`. Uploaded spot photos still live
+  on the temporary disk and reset on restart.
 - **Sleeps when idle.** After ~15 minutes without traffic the service
   spins down; the next request takes 30–60 seconds.
-- **Run a single instance.** SQLite is a local file, so a second instance
-  would have its own diverging copy.
+- **Single instance is still advised.** Rate limiting and sign-in handoff
+  state are held in memory per process.
 
 ## Known limitations of the app
 
@@ -127,5 +130,4 @@ real people's data.
 - **Uploaded photos are not access-controlled.** Anyone with the URL can
   view one.
 - **Rate limiting is per-process and in-memory**, so it resets on deploy.
-- **`node:sqlite` is still marked experimental** in Node 24.
 - **Spot ratings and the owner earnings chart are illustrative.**

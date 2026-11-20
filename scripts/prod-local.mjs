@@ -33,6 +33,8 @@ const env = {
   NODE_ENV: "production",
   PORT: process.env.PORT ?? "3002",
   DATA_DIR: dataDir,
+  // A local production run must never touch the real database.
+  DATABASE_URL: "",
   // Real production requires this to be set explicitly; generate an
   // ephemeral one here so the smoke test can run unattended.
   SESSION_SECRET: process.env.SESSION_SECRET ?? randomBytes(48).toString("base64url"),
