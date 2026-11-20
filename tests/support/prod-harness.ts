@@ -52,6 +52,8 @@ export const startProdServer = async (
       NODE_ENV: "production",
       PORT: String(port),
       DATA_DIR: dataDir,
+      /* Never the real database: the suite resets and deletes accounts. */
+      DATABASE_URL: "",
       SESSION_SECRET: secret,
       DEMO_MODE: "false",
     },
@@ -129,6 +131,8 @@ export const startWithSecret = (
       NODE_ENV: "production",
       PORT: String(port),
       DATA_DIR: PROD_DATA_DIR,
+      /* Never the real database: the suite resets and deletes accounts. */
+      DATABASE_URL: "",
       SESSION_SECRET: sessionSecret,
     },
     stdio: ["ignore", "pipe", "pipe"],

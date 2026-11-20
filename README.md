@@ -3,7 +3,7 @@
 Peer-to-peer parking. Drivers find and book a space near them, owners list
 a driveway or garage, admins moderate both.
 
-React 19 + Vite on the front, Express 5 + `node:sqlite` on the back,
+React 19 + Vite on the front, Express 5 + Postgres on the back,
 Leaflet and OpenStreetMap for the map. Seeded with real Chennai locations,
 so distances and map placement are genuine.
 
@@ -31,11 +31,14 @@ data resets on restart.)
 
 | | |
 |---|---|
-| Node | **≥ 24** (the server uses the built-in `node:sqlite`) |
+| Node | **≥ 24** |
 | OS | Windows, macOS or Linux |
 
-No database to provision — SQLite lives at `server/parkspace.db` and is
-created and seeded automatically on first start.
+No database to install. With `DATABASE_URL` unset, the server uses PGlite
+(Postgres compiled to WASM) in `server/pgdata/`, created and seeded
+automatically on first start. Set `DATABASE_URL` in `.env` to a hosted
+Postgres (for example Neon) and the same code uses that instead, which is what
+a deployment needs so registered users survive restarts.
 
 ### Run it
 
@@ -111,7 +114,7 @@ npm run typecheck       # tsc over the app and the test suite
 npm run lint             # oxlint + a UTF-8/mojibake check
 npm test                 # build, then the Playwright suite
 
-node scripts/db-query.mjs   # read-only viewer for the SQLite database
+node scripts/db-query.mjs   # read-only viewer for the database
 ```
 
 Run `typecheck`, `lint`, `build` and `test` before pushing.
@@ -138,7 +141,7 @@ src/                      the React app
 
 server/                   the API
   index.js                Express routes, security headers, rate limiting
-  db.js                   SQLite schema, seed data, queries
+  db.js                   Postgres schema, seed data, queries
   oauth.js                Authorization Code + PKCE, provider registry
   apple.js                Sign in with Apple — ES256 client secret, id_token
   session.js              signed session tokens

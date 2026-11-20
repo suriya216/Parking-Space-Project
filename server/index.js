@@ -135,10 +135,10 @@ app.use("/api", (_req, res, next) => {
   next();
 });
 
-const added = db.seed();
+const added = (await db.seed());
 console.log(`[db] ${db.DB_PATH}`);
 console.log(`[db] seeded ${added.users} user(s), ${added.spots} spot(s), ${added.bookings} booking(s)`);
-console.log(`[db] totals: ${db.listUsers().length} users, ${db.countSpots()} spots, ${db.countBookings()} bookings`);
+console.log(`[db] totals: ${(await db.listUsers()).length} users, ${(await db.countSpots())} spots, ${(await db.countBookings())} bookings`);
 
 const oauthReady = oauth.configuredProviders();
 if (oauthReady.length) {
@@ -158,24 +158,32 @@ if (oauthReady.length) {
 // access immediately rather than at token expiry.
 const tokenFor = (user) => session.issue(user);
 
-const userFromToken = (token) => {
+const userFromToken = async (token) => {
   const payload = session.verify(token);
   if (!payload) return null;
 
-  const row = db.findUserWithHash(payload.uid);
+  const row = (await db.findUserWithHash(payload.uid));
   if (!row) return null;
 
   const { pass_hash: _omit, ...safe } = row;
   return safe;
 };
 
-const currentUser = (req) => {
+const currentUser = async (req) => {
   const token = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
   return token ? userFromToken(token) : null;
 };
 
-const requireUser = (req, res, next) => {
-  const user = currentUser(req);
+// Async middleware: a failed lookup is reported as a 500 JSON body like
+// every other handler, rather than left as an unhandled rejection.
+const requireUser = async (req, res, next) => {
+  let user;
+  try {
+    user = await currentUser(req);
+  } catch (e) {
+    console.error("[api]", e);
+    return res.status(500).json({ error: e.message });
+  }
   if (!user) return res.status(401).json({ error: "Not signed in." });
   req.user = user;
   next();
@@ -193,9 +201,9 @@ const requireAdmin = requireRole("admin");
 
 // Wraps a handler so a thrown error becomes a 500 JSON body instead of
 // Express's default HTML error page.
-const handler = (fn) => (req, res) => {
+const handler = (fn) => async (req, res) => {
   try {
-    fn(req, res);
+    await fn(req, res);
   } catch (e) {
     console.error("[api]", e);
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -217,7 +225,7 @@ const publicUser = ({ id, name, email, phone, role, roles, provider, avatar, upi
     provider: provider ?? "local", avatar: avatar ?? "", upi_id: upi_id ?? "", created_at,
   });
 
-app.post("/api/login", rateLimitAuth, handler((req, res) => {
+app.post("/api/login", rateLimitAuth, handler(async (req, res) => {
   const { email, password, role } = req.body ?? {};
   if (!email || !password) {
     return res.status(400).json({ error: "Email and password are required." });
@@ -231,8 +239,8 @@ app.post("/api/login", rateLimitAuth, handler((req, res) => {
   // ask for a role up front — `role` arrives only on the second attempt,
   // after an ambiguous first one.
   const matches = role
-    ? [db.authenticate(email, password, role)].filter(Boolean)
-    : db.authenticateAny(email, password);
+    ? [(await db.authenticate(email, password, role))].filter(Boolean)
+    : (await db.authenticateAny(email, password));
 
   // Deliberately vague: saying "no such account" would let anyone
   // enumerate which emails are registered.
@@ -258,7 +266,7 @@ app.post("/api/login", rateLimitAuth, handler((req, res) => {
   res.json({ user: publicUser(user), token: tokenFor(user) });
 }));
 
-app.post("/api/register", rateLimitAuth, handler((req, res) => {
+app.post("/api/register", rateLimitAuth, handler(async (req, res) => {
   const { name, email, password, role } = req.body ?? {};
   if (!name || !email || !password) {
     return res.status(400).json({ error: "Name, email and password are required." });
@@ -281,12 +289,12 @@ app.post("/api/register", rateLimitAuth, handler((req, res) => {
   // to be proved, anyone can occupy the unused role on someone else's
   // address. They gain no access to the other account or its data, but
   // they do take the slot.
-  if (db.findAccount(email, role)) {
+  if ((await db.findAccount(email, role))) {
     return res.status(409).json({
       error: `That email already has a ${role} account. Sign in instead.`,
     });
   }
-  const user = db.createUser({ name, email, password, role });
+  const user = (await db.createUser({ name, email, password, role }));
   res.status(201).json({ user: publicUser(user), token: tokenFor(user) });
 }));
 
@@ -324,7 +332,7 @@ const resetEmail = ({ name, link }) => {
   };
 };
 
-app.post("/api/password-reset", rateLimitAuth, handler((req, res) => {
+app.post("/api/password-reset", rateLimitAuth, handler(async (req, res) => {
   const email = String(req.body?.email ?? "").trim();
   if (!email) return res.status(400).json({ error: "Email is required." });
 
@@ -340,18 +348,18 @@ app.post("/api/password-reset", rateLimitAuth, handler((req, res) => {
     console.error("[mail] password reset skipped: set APP_PUBLIC_URL so the emailed link has somewhere to point.");
     return;
   }
-  const reset = db.createPasswordReset(email);
+  const reset = (await db.createPasswordReset(email));
   if (!reset) return;
   mailer
     .sendMail({ to: email, ...resetEmail({ name: reset.name, link: `${base}/?reset=${reset.token}` }) })
     .catch((e) => console.error("[mail] password reset email failed:", e.message));
 }));
 
-app.get("/api/password-reset/:token", rateLimitAuth, handler((req, res) => {
-  res.json({ valid: db.isPasswordResetValid(req.params.token) });
+app.get("/api/password-reset/:token", rateLimitAuth, handler(async (req, res) => {
+  res.json({ valid: (await db.isPasswordResetValid(req.params.token)) });
 }));
 
-app.post("/api/password-reset/confirm", rateLimitAuth, handler((req, res) => {
+app.post("/api/password-reset/confirm", rateLimitAuth, handler(async (req, res) => {
   const { token, password } = req.body ?? {};
   if (!token || !password) {
     return res.status(400).json({ error: "A reset link and a new password are required." });
@@ -359,7 +367,7 @@ app.post("/api/password-reset/confirm", rateLimitAuth, handler((req, res) => {
   if (String(password).length < 6) {
     return res.status(400).json({ error: "Password must be at least 6 characters." });
   }
-  if (!db.consumePasswordReset(token, String(password))) {
+  if (!(await db.consumePasswordReset(token, String(password)))) {
     noteAuthFailure(req);
     return res.status(400).json({ error: "This reset link is invalid or has expired. Request a new one." });
   }
@@ -370,7 +378,7 @@ app.post("/api/password-reset/confirm", rateLimitAuth, handler((req, res) => {
 // flow can be tested without a mail account. Absent in production, where
 // it would hand a reset token to anyone who asked.
 if (!IS_PROD) {
-  app.get("/api/dev/outbox", handler((req, res) => {
+  app.get("/api/dev/outbox", handler(async (req, res) => {
     const message = mailer.lastCaptured(String(req.query.to ?? ""));
     if (!message) return res.status(404).json({ error: "Nothing captured for that address." });
     res.json(message);
@@ -388,7 +396,7 @@ if (!IS_PROD) {
 // ─── OAUTH (Authorization Code + PKCE) ──────────────────
 // Which providers actually have credentials. The sign-in screen uses this
 // to show real buttons instead of ones that would fail.
-app.get("/api/auth/providers", handler((_req, res) => {
+app.get("/api/auth/providers", handler(async (_req, res) => {
   res.json({
     providers: oauth.configuredProviders(),
     // Still reported because DEMO_MODE gates /api/demo-accounts, which the
@@ -461,14 +469,14 @@ const handleOAuthCallback = async (req, res) => {
       if (extra) Object.assign(profile, extra);
     }
 
-    const result = db.upsertOAuthUser({
+    const result = (await db.upsertOAuthUser({
       provider: provider.id,
       providerId: profile.providerId,
       email: profile.email,
       name: profile.name,
       avatar: profile.avatar,
       emailVerified: profile.emailVerified,
-    });
+    }));
 
     if (result.conflict === "unverified-email") {
       return oauthFail(res,
@@ -499,7 +507,7 @@ app.get("/api/auth/:provider/callback", handleOAuthCallback);
 // Apple only: response_mode=form_post. Harmless for the others.
 app.post("/api/auth/:provider/callback", handleOAuthCallback);
 
-app.post("/api/auth/exchange", handler((req, res) => {
+app.post("/api/auth/exchange", handler(async (req, res) => {
   const { code } = req.body ?? {};
   if (!code) return res.status(400).json({ error: "Missing handoff code." });
   const session = oauth.consumeHandoff(String(code));
@@ -510,11 +518,11 @@ app.post("/api/auth/exchange", handler((req, res) => {
 }));
 
 // ─── ME ─────────────────────────────────────────────────
-app.get("/api/me", requireUser, handler((req, res) => {
+app.get("/api/me", requireUser, handler(async (req, res) => {
   res.json({ user: publicUser(req.user) });
 }));
 
-app.patch("/api/me", requireUser, handler((req, res) => {
+app.patch("/api/me", requireUser, handler(async (req, res) => {
   const { name, email, phone, upiId } = req.body ?? {};
   if (!name || !email) {
     return res.status(400).json({ error: "Name and email are required." });
@@ -527,16 +535,16 @@ app.patch("/api/me", requireUser, handler((req, res) => {
   }
   // Only a clash in the SAME role blocks the change: another role's
   // account on that address is a separate account and may coexist.
-  const clash = db.findAccount(email, req.user.role);
+  const clash = (await db.findAccount(email, req.user.role));
   if (clash && clash.id !== req.user.id) {
     return res.status(409).json({ error: "That email is already in use." });
   }
-  const user = db.updateUserProfile(req.user.id, { name, email, phone: phone ?? "", upiId: upi });
+  const user = (await db.updateUserProfile(req.user.id, { name, email, phone: phone ?? "", upiId: upi }));
   // The token embeds the email, so changing it invalidates the old one.
   res.json({ user: publicUser(user), token: tokenFor(user) });
 }));
 
-app.post("/api/me/password", requireUser, handler((req, res) => {
+app.post("/api/me/password", requireUser, handler(async (req, res) => {
   const { currentPassword, newPassword } = req.body ?? {};
   if (!currentPassword || !newPassword) {
     return res.status(400).json({ error: "Both current and new password are required." });
@@ -553,11 +561,11 @@ app.post("/api/me/password", requireUser, handler((req, res) => {
   }
   // By id, not by email: an address can carry more than one account and
   // only this one's password is being changed.
-  if (!db.authenticateById(req.user.id, currentPassword)) {
+  if (!(await db.authenticateById(req.user.id, currentPassword))) {
     noteAuthFailure(req);
     return res.status(403).json({ error: "Current password is incorrect." });
   }
-  db.changePassword(req.user.id, newPassword);
+  (await db.changePassword(req.user.id, newPassword));
   res.json({ ok: true, message: "Password updated." });
 }));
 
@@ -565,7 +573,7 @@ app.post("/api/me/password", requireUser, handler((req, res) => {
 // GET /api/spots?lat=&lng=&radius=
 // With lat/lng the results carry a real haversine distance and are sorted
 // nearest-first; without, distance is null and order is by id.
-app.get("/api/spots", handler((req, res) => {
+app.get("/api/spots", handler(async (req, res) => {
   const num = (v) => {
     if (v == null || v === "") return null;
     const n = Number(v);
@@ -587,7 +595,7 @@ app.get("/api/spots", handler((req, res) => {
   }
 
   res.json({
-    spots: db.listSpots({ lat, lng, radius }),
+    spots: (await db.listSpots({ lat, lng, radius })),
     center: lat != null ? { lat, lng } : db.DEFAULT_CENTER,
     usedFallbackCenter: lat == null,
   });
@@ -601,7 +609,7 @@ const SPOT_PHOTOS = [
   "/spots/gated-compound.svg",
 ];
 
-app.post("/api/spots", requireRole("owner", "admin"), handler((req, res) => {
+app.post("/api/spots", requireRole("owner", "admin"), handler(async (req, res) => {
   const { name, address, type, vehicle, price, lat, lng, photo, available } = req.body ?? {};
 
   if (!name || !address || !vehicle || !available) {
@@ -621,23 +629,23 @@ app.post("/api/spots", requireRole("owner", "admin"), handler((req, res) => {
   // Either one of the bundled illustrations, or a photo this owner has
   // uploaded. Checking ownership stops one owner referencing another's
   // upload by guessing a path.
-  if (photo && !SPOT_PHOTOS.includes(photo) && !db.findSpotPhoto(req.user.id, photo)) {
+  if (photo && !SPOT_PHOTOS.includes(photo) && !(await db.findSpotPhoto(req.user.id, photo))) {
     return res.status(400).json({ error: "Unknown photo." });
   }
 
   try {
-    const spot = db.createSpot({
+    const spot = (await db.createSpot({
       name, address, type, vehicle, price: p, lat: la, lng: ln,
       photo: photo || SPOT_PHOTOS[0],
       owner: req.user.name,
       available,
       createdBy: req.user.id,
-    });
+    }));
     res.status(201).json({ spot });
   } catch (e) {
     // (name, address) is unique. Report the clash as a conflict with a
     // usable message instead of letting it surface as a 500.
-    if (e?.code === "ERR_SQLITE_ERROR" && /UNIQUE constraint failed: spots/.test(e.message)) {
+    if (e?.code === "23505" && /^spots_/.test(e.constraint ?? "")) {
       return res.status(409).json({
         error: "A listing with that name already exists at that address.",
       });
@@ -646,25 +654,25 @@ app.post("/api/spots", requireRole("owner", "admin"), handler((req, res) => {
   }
 }));
 
-app.patch("/api/spots/:id", requireAdmin, handler((req, res) => {
+app.patch("/api/spots/:id", requireAdmin, handler(async (req, res) => {
   const id = asId(req.params.id);
-  if (!id || !db.findSpot(id)) return res.status(404).json({ error: "Spot not found." });
+  if (!id || !(await db.findSpot(id))) return res.status(404).json({ error: "Spot not found." });
   const { verified } = req.body ?? {};
   if (typeof verified !== "boolean") {
     return res.status(400).json({ error: "`verified` must be true or false." });
   }
-  res.json({ spot: db.setSpotVerified(id, verified) });
+  res.json({ spot: (await db.setSpotVerified(id, verified)) });
 }));
 
 // Admins can delete any spot; owners only their own.
-app.delete("/api/spots/:id", requireRole("owner", "admin"), handler((req, res) => {
+app.delete("/api/spots/:id", requireRole("owner", "admin"), handler(async (req, res) => {
   const id = asId(req.params.id);
-  const spot = id && db.findSpot(id);
+  const spot = id && (await db.findSpot(id));
   if (!spot) return res.status(404).json({ error: "Spot not found." });
   if (req.user.role !== "admin" && spot.created_by !== req.user.id) {
     return res.status(403).json({ error: "You can only delete your own listings." });
   }
-  db.deleteSpot(id);
+  (await db.deleteSpot(id));
   res.json({ ok: true, deleted: id });
 }));
 
@@ -731,14 +739,14 @@ app.post("/api/payments/order", requireUser, handler(async (req, res) => {
   if (!Number.isInteger(h) || h < 1 || h > 24) {
     return res.status(400).json({ error: "Hours must be a whole number from 1 to 24." });
   }
-  const spot = db.findSpot(sid);
+  const spot = (await db.findSpot(sid));
   if (!spot) return res.status(404).json({ error: "Spot not found." });
 
   const amountPaise = Math.round(spot.price * h * 1.1) * 100;
   const order = await payments.createOrder(amountPaise, `spot${sid}-${Date.now()}`);
   // The owner's UPI id (if they set one) rides along so the client can show
   // "paying <owner>" and, in a real deployment, route the payout.
-  const owner = spot.created_by ? db.findUser(spot.created_by) : null;
+  const owner = spot.created_by ? (await db.findUser(spot.created_by)) : null;
   res.json({ ...order, ownerUpi: owner?.upi_id || "" });
 }));
 
@@ -746,7 +754,7 @@ app.post("/api/payments/order", requireUser, handler(async (req, res) => {
 // app. Returns a valid payment id + signature the client then submits with
 // the booking, exactly as Razorpay Checkout would in production. Refused
 // when real gateway keys are configured.
-app.post("/api/payments/demo-complete", requireUser, handler((req, res) => {
+app.post("/api/payments/demo-complete", requireUser, handler(async (req, res) => {
   if (payments.GATEWAY_LIVE) {
     return res.status(404).json({ error: "Not available." });
   }
@@ -756,11 +764,11 @@ app.post("/api/payments/demo-complete", requireUser, handler((req, res) => {
 }));
 
 // ─── BOOKINGS ───────────────────────────────────────────
-app.get("/api/bookings", requireUser, handler((req, res) => {
-  res.json({ bookings: db.listBookingsForUser(req.user) });
+app.get("/api/bookings", requireUser, handler(async (req, res) => {
+  res.json({ bookings: (await db.listBookingsForUser(req.user)) });
 }));
 
-app.post("/api/bookings", requireUser, handler((req, res) => {
+app.post("/api/bookings", requireUser, handler(async (req, res) => {
   const { spotId, hours, startAt, payment } = req.body ?? {};
   const sid = asId(spotId);
   const h = Number(hours);
@@ -769,7 +777,7 @@ app.post("/api/bookings", requireUser, handler((req, res) => {
   if (!Number.isInteger(h) || h < 1 || h > 24) {
     return res.status(400).json({ error: "Hours must be a whole number from 1 to 24." });
   }
-  if (!db.findSpot(sid)) return res.status(404).json({ error: "Spot not found." });
+  if (!(await db.findSpot(sid))) return res.status(404).json({ error: "Spot not found." });
 
   // The date and time window are derived server-side from the start
   // instant, so a client can't submit a label that disagrees with the
@@ -781,20 +789,20 @@ app.post("/api/bookings", requireUser, handler((req, res) => {
   // Payment is checked before the row is written, so a rejected card never
   // leaves a booking behind. The amount is recomputed here, never trusted
   // from the client, and the gateway signature is verified against it.
-  const spot = db.findSpot(sid);
+  const spot = (await db.findSpot(sid));
   const expectedPaise = Math.round(spot.price * h * 1.1) * 100;
   const paid = takePayment(payment, expectedPaise);
   if (paid.error) return res.status(400).json({ error: paid.error });
 
-  const booking = db.createBooking({
+  const booking = (await db.createBooking({
     userId: req.user.id, spotId: sid, hours: h, startAt, paidVia: paid.label, paymentStatus: paid.status,
-  });
+  }));
   res.status(201).json({ booking });
 }));
 
-app.patch("/api/bookings/:id", requireUser, handler((req, res) => {
+app.patch("/api/bookings/:id", requireUser, handler(async (req, res) => {
   const id = asId(req.params.id);
-  const booking = id && db.findBooking(id);
+  const booking = id && (await db.findBooking(id));
   if (!booking) return res.status(404).json({ error: "Booking not found." });
 
   // A driver may only touch their own booking; owners and admins may act
@@ -820,7 +828,7 @@ app.patch("/api/bookings/:id", requireUser, handler((req, res) => {
     if (booking.payment_status !== "pending") {
       return res.status(409).json({ error: "There is no cash payment waiting to be confirmed." });
     }
-    return res.json({ booking: db.confirmCashPayment(id) });
+    return res.json({ booking: (await db.confirmCashPayment(id)) });
   }
 
   if (extendHours != null) {
@@ -834,7 +842,7 @@ app.patch("/api/bookings/:id", requireUser, handler((req, res) => {
     if (booking.hours + extra > 24) {
       return res.status(400).json({ error: "A booking cannot exceed 24 hours." });
     }
-    return res.json({ booking: db.extendBooking(id, extra) });
+    return res.json({ booking: (await db.extendBooking(id, extra)) });
   }
 
   if (status != null) {
@@ -844,7 +852,7 @@ app.patch("/api/bookings/:id", requireUser, handler((req, res) => {
     if (booking.status !== "active") {
       return res.status(409).json({ error: `Booking is already ${booking.status}.` });
     }
-    return res.json({ booking: db.setBookingStatus(id, status) });
+    return res.json({ booking: (await db.setBookingStatus(id, status)) });
   }
 
   res.status(400).json({ error: "Provide status, extendHours or cashReceived." });
@@ -904,19 +912,19 @@ const passBody = (booking, role) => {
 // database round trip.
 const asPassToken = (v) => (/^[a-f0-9]{32}$/i.test(String(v ?? "")) ? String(v) : null);
 
-app.get("/api/pass/:token", handler((req, res) => {
+app.get("/api/pass/:token", handler(async (req, res) => {
   const token = asPassToken(req.params.token);
-  const booking = token && db.findBookingByPassToken(token);
+  const booking = token && (await db.findBookingByPassToken(token));
   // Same 404 for a malformed token and an unknown one, so the shape of a
   // valid token can't be probed for.
   if (!booking) return res.status(404).json({ error: "That parking pass isn't valid." });
 
-  res.json({ pass: passBody(booking, passViewerRole(currentUser(req), booking)) });
+  res.json({ pass: passBody(booking, passViewerRole(await currentUser(req), booking)) });
 }));
 
-app.post("/api/pass/:token/arrival", requireUser, handler((req, res) => {
+app.post("/api/pass/:token/arrival", requireUser, handler(async (req, res) => {
   const token = asPassToken(req.params.token);
-  const booking = token && db.findBookingByPassToken(token);
+  const booking = token && (await db.findBookingByPassToken(token));
   if (!booking) return res.status(404).json({ error: "That parking pass isn't valid." });
 
   const role = passViewerRole(req.user, booking);
@@ -929,37 +937,37 @@ app.post("/api/pass/:token/arrival", requireUser, handler((req, res) => {
     return res.status(409).json({ error: `This booking is ${booking.status}.` });
   }
 
-  const updated = db.markBookingArrived(booking.id, req.user.id);
+  const updated = (await db.markBookingArrived(booking.id, req.user.id));
   res.json({ pass: passBody(updated, passViewerRole(req.user, updated)) });
 }));
 
 // ─── FAVOURITES ─────────────────────────────────────────
-app.get("/api/favourites", requireUser, handler((req, res) => {
-  res.json({ favourites: db.listFavourites(req.user.id) });
+app.get("/api/favourites", requireUser, handler(async (req, res) => {
+  res.json({ favourites: (await db.listFavourites(req.user.id)) });
 }));
 
-app.put("/api/favourites/:spotId", requireUser, handler((req, res) => {
+app.put("/api/favourites/:spotId", requireUser, handler(async (req, res) => {
   const id = asId(req.params.spotId);
-  if (!id || !db.findSpot(id)) return res.status(404).json({ error: "Spot not found." });
-  db.addFavourite(req.user.id, id);
-  res.json({ favourites: db.listFavourites(req.user.id) });
+  if (!id || !(await db.findSpot(id))) return res.status(404).json({ error: "Spot not found." });
+  (await db.addFavourite(req.user.id, id));
+  res.json({ favourites: (await db.listFavourites(req.user.id)) });
 }));
 
-app.delete("/api/favourites/:spotId", requireUser, handler((req, res) => {
+app.delete("/api/favourites/:spotId", requireUser, handler(async (req, res) => {
   const id = asId(req.params.spotId);
   if (!id) return res.status(400).json({ error: "Invalid spot id." });
-  db.removeFavourite(req.user.id, id);
-  res.json({ favourites: db.listFavourites(req.user.id) });
+  (await db.removeFavourite(req.user.id, id));
+  res.json({ favourites: (await db.listFavourites(req.user.id)) });
 }));
 
 // ─── VEHICLES ───────────────────────────────────────────
 const VEHICLE_TYPES = ["Bike", "Sedan", "SUV", "Hatchback"];
 
-app.get("/api/vehicles", requireUser, handler((req, res) => {
-  res.json({ vehicles: db.listVehicles(req.user.id) });
+app.get("/api/vehicles", requireUser, handler(async (req, res) => {
+  res.json({ vehicles: (await db.listVehicles(req.user.id)) });
 }));
 
-app.post("/api/vehicles", requireUser, handler((req, res) => {
+app.post("/api/vehicles", requireUser, handler(async (req, res) => {
   const { label, plate, type } = req.body ?? {};
   if (!label || !plate) {
     return res.status(400).json({ error: "Model and plate number are required." });
@@ -967,21 +975,21 @@ app.post("/api/vehicles", requireUser, handler((req, res) => {
   if (!VEHICLE_TYPES.includes(type)) {
     return res.status(400).json({ error: `Type must be one of: ${VEHICLE_TYPES.join(", ")}.` });
   }
-  res.status(201).json({ vehicle: db.addVehicle(req.user.id, { label, plate, type }) });
+  res.status(201).json({ vehicle: (await db.addVehicle(req.user.id, { label, plate, type })) });
 }));
 
-app.delete("/api/vehicles/:id", requireUser, handler((req, res) => {
+app.delete("/api/vehicles/:id", requireUser, handler(async (req, res) => {
   const id = asId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid vehicle id." });
-  if (!db.deleteVehicle(req.user.id, id)) {
+  if (!(await db.deleteVehicle(req.user.id, id))) {
     return res.status(404).json({ error: "Vehicle not found." });
   }
   res.json({ ok: true, deleted: id });
 }));
 
 // ─── OWNER ──────────────────────────────────────────────
-app.get("/api/owner/earnings", requireRole("owner", "admin"), handler((req, res) => {
-  const e = db.ownerEarnings(req.user.id);
+app.get("/api/owner/earnings", requireRole("owner", "admin"), handler(async (req, res) => {
+  const e = (await db.ownerEarnings(req.user.id));
   res.json({ revenue: e.revenue, bookings: e.bookings });
 }));
 
@@ -1008,11 +1016,11 @@ const IMAGE_SIGNATURES = [
 
 const MAX_UPLOAD_BYTES = 6 * 1024 * 1024;
 
-app.get("/api/spot-photos", requireRole("owner", "admin"), handler((req, res) => {
-  res.json({ photos: db.listSpotPhotos(req.user.id), stock: SPOT_PHOTOS });
+app.get("/api/spot-photos", requireRole("owner", "admin"), handler(async (req, res) => {
+  res.json({ photos: (await db.listSpotPhotos(req.user.id)), stock: SPOT_PHOTOS });
 }));
 
-app.post("/api/spot-photos", requireRole("owner", "admin"), handler((req, res) => {
+app.post("/api/spot-photos", requireRole("owner", "admin"), handler(async (req, res) => {
   const { dataUrl, label } = req.body ?? {};
   if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) {
     return res.status(400).json({ error: "Expected an image as a data URL." });
@@ -1046,20 +1054,20 @@ app.post("/api/spot-photos", requireRole("owner", "admin"), handler((req, res) =
   const path = `/uploads/${name}`;
 
   res.status(201).json({
-    photo: db.addSpotPhoto(req.user.id, path, String(label ?? "").slice(0, 60)),
+    photo: (await db.addSpotPhoto(req.user.id, path, String(label ?? "").slice(0, 60))),
     bytes: bytes.length,
     type: kind.mime,
   });
 }));
 
-app.delete("/api/spot-photos/:id", requireRole("owner", "admin"), handler((req, res) => {
+app.delete("/api/spot-photos/:id", requireRole("owner", "admin"), handler(async (req, res) => {
   const id = asId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid photo id." });
-  const row = db.deleteSpotPhoto(req.user.id, id);
+  const row = (await db.deleteSpotPhoto(req.user.id, id));
   if (!row) return res.status(404).json({ error: "Photo not found." });
 
   // Only unlink once no listing still points at it.
-  const stillUsed = db.listSpots().some((s) => s.photo === row.path);
+  const stillUsed = (await db.listSpots()).some((s) => s.photo === row.path);
   if (!stillUsed) {
     try { unlinkSync(join(UPLOAD_DIR, row.path.replace("/uploads/", ""))); } catch { /* already gone */ }
   }
@@ -1119,13 +1127,13 @@ app.get("/api/places", async (req, res) => {
 });
 
 // ─── ADMIN ──────────────────────────────────────────────
-app.get("/api/users", requireAdmin, handler((_req, res) => {
-  res.json({ users: db.listUsers() });
+app.get("/api/users", requireAdmin, handler(async (_req, res) => {
+  res.json({ users: (await db.listUsers()) });
 }));
 
-app.patch("/api/users/:id", requireAdmin, handler((req, res) => {
+app.patch("/api/users/:id", requireAdmin, handler(async (req, res) => {
   const id = asId(req.params.id);
-  const target = id && db.findUser(id);
+  const target = id && (await db.findUser(id));
   if (!target) return res.status(404).json({ error: "User not found." });
 
   const { role } = req.body ?? {};
@@ -1137,10 +1145,10 @@ app.patch("/api/users/:id", requireAdmin, handler((req, res) => {
   if (target.id === req.user.id && role !== "admin") {
     return res.status(409).json({ error: "You cannot change your own role." });
   }
-  if (target.role === "admin" && role !== "admin" && db.countAdmins() <= 1) {
+  if (target.role === "admin" && role !== "admin" && (await db.countAdmins()) <= 1) {
     return res.status(409).json({ error: "Cannot demote the last admin." });
   }
-  const user = db.setUserRole(id, role);
+  const user = (await db.setUserRole(id, role));
   // Null means this address already holds an account in the target role.
   // Merging the two is not something a role dropdown should decide.
   if (!user) {
@@ -1151,34 +1159,34 @@ app.patch("/api/users/:id", requireAdmin, handler((req, res) => {
   res.json({ user });
 }));
 
-app.delete("/api/users/:id", requireAdmin, handler((req, res) => {
+app.delete("/api/users/:id", requireAdmin, handler(async (req, res) => {
   const id = asId(req.params.id);
-  const target = id && db.findUser(id);
+  const target = id && (await db.findUser(id));
   if (!target) return res.status(404).json({ error: "User not found." });
   if (target.id === req.user.id) {
     return res.status(409).json({ error: "You cannot delete your own account." });
   }
-  if (target.role === "admin" && db.countAdmins() <= 1) {
+  if (target.role === "admin" && (await db.countAdmins()) <= 1) {
     return res.status(409).json({ error: "Cannot delete the last admin." });
   }
-  db.deleteUser(id);
+  (await db.deleteUser(id));
   res.json({ ok: true, deleted: id });
 }));
 
-app.get("/api/stats", requireAdmin, handler((_req, res) => {
-  const byRole = Object.fromEntries(db.countUsers().map((r) => [r.role, r.n]));
+app.get("/api/stats", requireAdmin, handler(async (_req, res) => {
+  const byRole = Object.fromEntries((await db.countUsers()).map((r) => [r.role, r.n]));
   res.json({
-    total: db.listUsers().length,
+    total: (await db.listUsers()).length,
     drivers: byRole.driver ?? 0,
     owners: byRole.owner ?? 0,
     admins: byRole.admin ?? 0,
-    spots: db.countSpots(),
-    bookings: db.countBookings(),
+    spots: (await db.countSpots()),
+    bookings: (await db.countBookings()),
   });
 }));
 
 // ─── MISC ───────────────────────────────────────────────
-app.get("/api/health", handler((_req, res) => res.json({ ok: true, db: db.DB_PATH })));
+app.get("/api/health", handler(async (_req, res) => res.json({ ok: true, db: db.DB_PATH })));
 
 // Test credentials for the seeded throwaway accounts.
 //
@@ -1191,7 +1199,7 @@ app.get("/api/health", handler((_req, res) => res.json({ ok: true, db: db.DB_PAT
 // Serving passwords over HTTP is only tolerable for fixed throwaway
 // accounts on a local machine, so this is hard-disabled unless DEMO_MODE
 // is on — which defaults to off in production.
-app.get("/api/demo-accounts", requireDemoMode, handler((_req, res) => {
+app.get("/api/demo-accounts", requireDemoMode, handler(async (_req, res) => {
   res.json({
     accounts: db.SEED_USERS.map(({ email, password, role }) => ({ email, password, role })),
   });

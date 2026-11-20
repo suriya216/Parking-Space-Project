@@ -1,4 +1,5 @@
-import { DatabaseSync } from "node:sqlite";
+import pg from "pg";
+import { PGlite } from "@electric-sql/pglite";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,223 +7,210 @@ import { mkdirSync } from "node:fs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-// DATA_DIR is where all mutable state lives, so a deployment can point it
-// at a mounted volume (Fly, Docker) and survive redeploys. Defaults to
-// this directory for local development.
+// ─── BACKEND ────────────────────────────────────────────
+// Two backends, one SQL dialect (Postgres):
+//
+//   DATABASE_URL set  → a real Postgres server (Neon, Supabase, ...). This
+//                       is what a deployment uses, because a host with an
+//                       ephemeral disk (Render's free tier) loses any local
+//                       file on every restart.
+//   DATABASE_URL unset → PGlite, Postgres compiled to WASM, persisted in a
+//                       local directory. This is what `npm run dev` and the
+//                       Playwright suite use, so nothing needs installing.
+//
+// DATA_DIR is where local mutable state lives (the PGlite directory and
+// uploaded photos). Defaults to this directory for local development.
 export const DATA_DIR = process.env.DATA_DIR ?? here;
-export const DB_PATH = process.env.PARKSPACE_DB ?? join(DATA_DIR, "parkspace.db");
 
-mkdirSync(dirname(DB_PATH), { recursive: true });
+const DATABASE_URL = (process.env.DATABASE_URL ?? "").trim();
+const LOCAL_PATH = process.env.PARKSPACE_DB ?? join(DATA_DIR, "pgdata");
 
-const db = new DatabaseSync(DB_PATH);
+// A label for logs and /api/health. Never the connection string, which
+// carries the password.
+export const DB_PATH = DATABASE_URL ? "postgres (DATABASE_URL)" : `pglite:${LOCAL_PATH}`;
 
-db.exec(`
-  PRAGMA journal_mode = WAL;
-  -- An account is identified by email AND role, not by email alone. One
-  -- person who both parks and rents out a space holds two accounts on the
-  -- same address, each with its own password — the same one or a different
-  -- one, whichever they choose. They are genuinely separate: separate
-  -- passwords, separate bookings, separate listings, separate profile.
+let pool = null;
+let lite = null;
+
+if (DATABASE_URL) {
+  // COUNT(*) is a bigint, which node-postgres returns as a string by
+  // default. Every count here is far below 2^53, so a number is safe.
+  pg.types.setTypeParser(20, (v) => Number(v));
+  pool = new pg.Pool({
+    connectionString: DATABASE_URL,
+    max: 5,
+    // Neon suspends an idle compute and drops its connections; do not hold
+    // them open, and allow time for a cold start to wake the database.
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 30_000,
+  });
+  // An idle client being dropped by the server must not crash the process.
+  pool.on("error", (e) => console.error("[db] idle client error:", e.message));
+} else {
+  mkdirSync(LOCAL_PATH, { recursive: true });
+  lite = new PGlite(LOCAL_PATH, { parsers: { 20: (v) => Number(v) } });
+  await lite.waitReady;
+}
+
+const shape = (r) => ({ rows: r.rows, count: r.rowCount ?? r.affectedRows ?? 0 });
+
+/** Run one parameterised statement. Returns `{ rows, count }`. */
+const query = async (text, params = []) =>
+  shape(pool ? await pool.query(text, params) : await lite.query(text, params));
+
+/** Run several statements with no parameters (schema setup). */
+const execScript = async (text) => {
+  if (pool) await pool.query(text);
+  else await lite.exec(text);
+};
+
+/** Run `fn(q)` inside a transaction; `q` is `query` bound to that transaction. */
+const transaction = async (fn) => {
+  if (lite) {
+    return lite.transaction(async (tx) => fn(async (text, params = []) => shape(await tx.query(text, params))));
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const out = await fn(async (text, params = []) => shape(await client.query(text, params)));
+    await client.query("COMMIT");
+    return out;
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+};
+
+export const close = async () => {
+  if (pool) await pool.end();
+  else await lite.close();
+};
+
+const one = async (text, params) => (await query(text, params)).rows[0];
+const all = async (text, params) => (await query(text, params)).rows;
+
+// Timestamps are stored as "YYYY-MM-DD HH24:MI:SS" UTC text, the same shape
+// the client already receives, rather than as native timestamps.
+const NOW_TEXT = "to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')";
+
+// ─── SCHEMA ─────────────────────────────────────────────
+// An account is identified by email AND role, not by email alone. One
+// person who both parks and rents out a space holds two accounts on the
+// same address, each with its own password. They are genuinely separate:
+// separate passwords, separate bookings, separate listings, separate profile.
+//
+// Email is compared case-insensitively through the lower(email) index and
+// `lower(email) = lower($1)` in every lookup.
+await execScript(`
   CREATE TABLE IF NOT EXISTS users (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT NOT NULL,
-    email      TEXT NOT NULL COLLATE NOCASE,
-    pass_hash  TEXT NOT NULL,
-    role       TEXT NOT NULL CHECK (role IN ('driver', 'owner', 'admin')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    upi_id     TEXT NOT NULL DEFAULT '',
-    UNIQUE (email, role)
+    id          SERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    email       TEXT NOT NULL,
+    pass_hash   TEXT NOT NULL,
+    role        TEXT NOT NULL CHECK (role IN ('driver', 'owner', 'admin')),
+    created_at  TEXT NOT NULL DEFAULT (${NOW_TEXT}),
+    upi_id      TEXT NOT NULL DEFAULT '',
+    phone       TEXT NOT NULL DEFAULT '',
+    -- OAuth identity. 'local' means a password account; otherwise the issuing
+    -- provider plus that provider's immutable subject id for this user.
+    provider    TEXT NOT NULL DEFAULT 'local',
+    provider_id TEXT,
+    avatar      TEXT NOT NULL DEFAULT ''
   );
+  CREATE UNIQUE INDEX IF NOT EXISTS users_email_role_idx ON users (lower(email), role);
+  CREATE UNIQUE INDEX IF NOT EXISTS users_provider_idx
+    ON users (provider, provider_id) WHERE provider_id IS NOT NULL;
 
   CREATE TABLE IF NOT EXISTS spots (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    id         SERIAL PRIMARY KEY,
     name       TEXT NOT NULL,
     address    TEXT NOT NULL,
     type       TEXT NOT NULL,
     vehicle    TEXT NOT NULL,
-    price      REAL NOT NULL,
-    rating     REAL NOT NULL DEFAULT 0,
+    price      DOUBLE PRECISION NOT NULL,
+    rating     DOUBLE PRECISION NOT NULL DEFAULT 0,
     reviews    INTEGER NOT NULL DEFAULT 0,
     verified   INTEGER NOT NULL DEFAULT 0,
-    lat        REAL NOT NULL,
-    lng        REAL NOT NULL,
+    lat        DOUBLE PRECISION NOT NULL,
+    lng        DOUBLE PRECISION NOT NULL,
     photo      TEXT NOT NULL,
     owner      TEXT NOT NULL,
     available  TEXT NOT NULL,
     since      INTEGER NOT NULL,
+    -- JSON array of accepted payment methods: ["online", "cash"]
     accepted_payment_methods TEXT NOT NULL DEFAULT '["online","cash"]',
+    created_by INTEGER REFERENCES users(id),
     UNIQUE (name, address)
   );
 
   CREATE TABLE IF NOT EXISTS bookings (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    id         SERIAL PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     spot_id    INTEGER NOT NULL REFERENCES spots(id) ON DELETE CASCADE,
     ref        TEXT NOT NULL UNIQUE,
     date       TEXT NOT NULL,
     time       TEXT NOT NULL,
     hours      INTEGER NOT NULL CHECK (hours > 0),
-    total      REAL NOT NULL,
+    total      DOUBLE PRECISION NOT NULL,
     status     TEXT NOT NULL DEFAULT 'active'
                CHECK (status IN ('active', 'completed', 'cancelled')),
+    -- confirmed (online payment), pending (cash), or failed
     payment_status TEXT NOT NULL DEFAULT 'confirmed'
                CHECK (payment_status IN ('confirmed', 'pending', 'failed')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (${NOW_TEXT}),
+    -- ISO timestamp of when the slot starts, so extending a booking can
+    -- recompute the end of the window.
+    start_at   TEXT,
+    -- How it was paid for, as a display label only ("Visa ···· 4242").
+    paid_via   TEXT NOT NULL DEFAULT '',
+    -- Unguessable handle for the booking's pass. The QR encodes THIS, never
+    -- the ref: refs are five digits, so a ref-keyed public lookup could be
+    -- enumerated in a few thousand requests.
+    pass_token TEXT,
+    -- Set when the spot's owner confirms the driver turned up and parked.
+    arrived_at TEXT,
+    arrived_by INTEGER REFERENCES users(id)
   );
 
   CREATE TABLE IF NOT EXISTS favourites (
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     spot_id    INTEGER NOT NULL REFERENCES spots(id) ON DELETE CASCADE,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (${NOW_TEXT}),
     PRIMARY KEY (user_id, spot_id)
   );
 
   CREATE TABLE IF NOT EXISTS vehicles (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    id         SERIAL PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     label      TEXT NOT NULL,
     plate      TEXT NOT NULL,
     type       TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (${NOW_TEXT})
   );
 
   -- Photos an owner has uploaded, so they can be reused on later
   -- listings instead of re-capturing the same driveway.
   CREATE TABLE IF NOT EXISTS spot_photos (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    id         SERIAL PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     path       TEXT NOT NULL UNIQUE,
     label      TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (${NOW_TEXT})
+  );
+
+  -- Only a SHA-256 of the token is stored, so a copy of the database cannot
+  -- be turned into working reset links.
+  CREATE TABLE IF NOT EXISTS password_resets (
+    id         SERIAL PRIMARY KEY,
+    email      TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at    TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
 `);
-
-// ─── MIGRATIONS ─────────────────────────────────────────
-// CREATE TABLE IF NOT EXISTS won't add columns to a table that already
-// exists, so add them explicitly for databases created by an earlier run.
-const addColumnIfMissing = (table, column, definition) => {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
-  if (!cols.some((c) => c.name === column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
-};
-
-addColumnIfMissing("users", "phone", "TEXT NOT NULL DEFAULT ''");
-// OAuth identity. 'local' means a password account; otherwise the issuing
-// provider plus that provider's immutable subject id for this user.
-addColumnIfMissing("users", "provider", "TEXT NOT NULL DEFAULT 'local'");
-addColumnIfMissing("users", "provider_id", "TEXT");
-addColumnIfMissing("users", "avatar", "TEXT NOT NULL DEFAULT ''");
-// Owner's UPI id (VPA), where booking payouts are directed. Optional — an
-// owner who only takes cash, or hasn't set it up yet, leaves it blank.
-addColumnIfMissing("users", "upi_id", "TEXT NOT NULL DEFAULT ''");
-
-// Accounts used to be keyed on email alone, with several roles hanging off
-// the one row via a user_roles table. They are now keyed on (email, role),
-// so the UNIQUE constraint on email has to go — and in SQLite a column
-// constraint can only be removed by rebuilding the table.
-//
-// Detected by the implicit index SQLite creates for `email TEXT UNIQUE`,
-// which the (email, role) schema does not have, so this runs exactly once.
-const emailIsUniqueAlone = () =>
-  db
-    .prepare("PRAGMA index_list(users)")
-    .all()
-    .filter((i) => i.unique)
-    .some((i) => {
-      const cols = db.prepare(`PRAGMA index_info(${JSON.stringify(i.name)})`).all();
-      return cols.length === 1 && cols[0].name === "email";
-    });
-
-if (emailIsUniqueAlone()) {
-  // Foreign keys are still off at this point (they go on below), so the
-  // drop-and-rename does not cascade bookings, spots or favourites away.
-  // Ids carry over verbatim, so every child row still resolves.
-  db.exec(`
-    CREATE TABLE users_rebuild (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      name       TEXT NOT NULL,
-      email      TEXT NOT NULL COLLATE NOCASE,
-      pass_hash  TEXT NOT NULL,
-      role       TEXT NOT NULL CHECK (role IN ('driver', 'owner', 'admin')),
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      phone      TEXT NOT NULL DEFAULT '',
-      provider   TEXT NOT NULL DEFAULT 'local',
-      provider_id TEXT,
-      avatar     TEXT NOT NULL DEFAULT '',
-      UNIQUE (email, role)
-    );
-    INSERT INTO users_rebuild
-      (id, name, email, pass_hash, role, created_at, phone, provider, provider_id, avatar)
-    SELECT id, name, email, pass_hash, role, created_at, phone, provider, provider_id, avatar
-    FROM users;
-    DROP TABLE users;
-    ALTER TABLE users_rebuild RENAME TO users;
-  `);
-}
-
-db.exec(
-  `CREATE UNIQUE INDEX IF NOT EXISTS users_provider_idx
-   ON users(provider, provider_id) WHERE provider_id IS NOT NULL`
-);
-
-addColumnIfMissing("spots", "created_by", "INTEGER REFERENCES users(id)");
-// JSON array of accepted payment methods: ["online", "cash"]
-addColumnIfMissing("spots", "accepted_payment_methods", "TEXT NOT NULL DEFAULT '[\"online\",\"cash\"]'");
-// ISO timestamp of when the slot starts. Needed so extending a booking can
-// recompute the end of the window rather than showing a vague "Nh from now".
-addColumnIfMissing("bookings", "start_at", "TEXT");
-// Payment status: confirmed (online payment), pending (cash), or failed
-addColumnIfMissing("bookings", "payment_status", "TEXT NOT NULL DEFAULT 'confirmed' CHECK (payment_status IN ('confirmed', 'pending', 'failed'))");
-// How the booking was paid for, as a display label only ("Visa ···· 4242",
-// "UPI asha@okhdfc"). Payment is taken at booking time and nothing
-// reusable is kept, so there is no saved-card table any more.
-addColumnIfMissing("bookings", "paid_via", "TEXT NOT NULL DEFAULT ''");
-// Unguessable handle for the booking's pass. The QR encodes THIS, never
-// the ref: refs are five digits, so a ref-keyed public lookup could be
-// enumerated in a few thousand requests.
-addColumnIfMissing("bookings", "pass_token", "TEXT");
-// Set when the spot's owner confirms the driver turned up and parked.
-addColumnIfMissing("bookings", "arrived_at", "TEXT");
-addColumnIfMissing("bookings", "arrived_by", "INTEGER REFERENCES users(id)");
-
-// The old multi-role table, from when one row could hold several roles.
-// Each extra role becomes its own account on the same email, carrying the
-// name and password hash it was granted under — otherwise somebody who had
-// signed up as both a driver and an owner would silently lose one of the
-// two. Bookings and listings stay with the original row, which keeps
-// whichever role it was last acting as.
-//
-// Runs before foreign keys go on, and before seeding, so the split rows are
-// in place by the time anything reads them.
-if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_roles'").get()) {
-  const extras = db
-    .prepare(
-      `SELECT u.name, u.email, u.pass_hash, u.phone, r.role
-       FROM user_roles r
-       JOIN users u ON u.id = r.user_id
-       WHERE r.role != u.role`
-    )
-    .all();
-
-  const insertSplit = db.prepare(
-    `INSERT OR IGNORE INTO users (name, email, pass_hash, role, phone)
-     VALUES (?, ?, ?, ?, ?)`
-  );
-  for (const e of extras) {
-    insertSplit.run(e.name, e.email, e.pass_hash, e.role, e.phone ?? "");
-  }
-
-  db.exec("DROP TABLE user_roles;");
-}
-
-db.exec("PRAGMA foreign_keys = ON;");
-
-// Saved cards are gone: payment is collected during booking and only a
-// display label survives on the booking row. Dropping the table keeps a
-// database created by an earlier version from holding card fragments
-// nothing can manage or delete any more.
-db.exec("DROP TABLE IF EXISTS payment_methods;");
 
 // ─── PASSWORD HASHING (scrypt, from node:crypto) ────────
 // Stored as "salt:hash", both hex. scrypt is a deliberately slow KDF,
@@ -271,36 +259,42 @@ const SEED_SPOTS = [
 // Chennai, roughly the middle of the seeded spots.
 export const DEFAULT_CENTER = { lat: 13.0435, lng: 80.2425 };
 
-export const seed = () => {
-  const insertUser = db.prepare(
-    `INSERT INTO users (name, email, pass_hash, role)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT (email, role) DO NOTHING`
-  );
+export const seed = async () => {
   let users = 0;
   for (const u of SEED_USERS) {
     // DO NOTHING rather than an update: an existing seed account keeps
-    // whatever password it has now, so restarts don't undo a change.
-    users += insertUser.run(u.name, u.email, hashPassword(u.password), u.role).changes;
+    // whatever password it has now, so restarts don't undo a change. Check
+    // first so a restart doesn't pay for a scrypt it will throw away.
+    if (await findAccount(u.email, u.role)) continue;
+    users += (
+      await query(
+        `INSERT INTO users (name, email, pass_hash, role)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (lower(email), role) DO NOTHING`,
+        [u.name, u.email, hashPassword(u.password), u.role],
+      )
+    ).count;
   }
 
   // ON CONFLICT against the (name, address) unique key keeps seeding
   // idempotent across restarts.
-  const insertSpot = db.prepare(
-    `INSERT INTO spots (name, address, type, vehicle, price, rating, reviews,
-                        verified, lat, lng, photo, owner, available, since, accepted_payment_methods)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (name, address) DO NOTHING`
-  );
   let spots = 0;
   for (const s of SEED_SPOTS) {
-    spots += insertSpot.run(s.name, s.address, s.type, s.vehicle, s.price, s.rating,
-      s.reviews, s.verified, s.lat, s.lng, s.photo, s.owner, s.available, s.since, s.acceptedPaymentMethods).changes;
+    spots += (
+      await query(
+        `INSERT INTO spots (name, address, type, vehicle, price, rating, reviews,
+                            verified, lat, lng, photo, owner, available, since, accepted_payment_methods)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+         ON CONFLICT (name, address) DO NOTHING`,
+        [s.name, s.address, s.type, s.vehicle, s.price, s.rating, s.reviews, s.verified,
+          s.lat, s.lng, s.photo, s.owner, s.available, s.since, s.acceptedPaymentMethods],
+      )
+    ).count;
   }
 
   // Link seeded spots to the seeded owner account by matching display name,
   // so the owner dashboard shows a real listing it can manage.
-  db.exec(`
+  await query(`
     UPDATE spots SET created_by = (
       SELECT id FROM users WHERE role = 'owner' AND users.name = spots.owner LIMIT 1
     )
@@ -311,42 +305,44 @@ export const seed = () => {
   // Give the demo driver some booking history, but only on a fresh
   // database — otherwise cancelling a seeded booking would undo itself.
   let bookings = 0;
-  const driver = db.prepare("SELECT id FROM users WHERE email = ?").get("driver@parkspace.test");
-  const existing = db.prepare("SELECT COUNT(*) AS n FROM bookings").get().n;
+  const driver = await one("SELECT id FROM users WHERE lower(email) = $1", ["driver@parkspace.test"]);
+  const existing = (await one("SELECT COUNT(*)::int AS n FROM bookings")).n;
 
   if (driver && existing === 0) {
-    const insertBooking = db.prepare(
-      `INSERT INTO bookings (user_id, spot_id, ref, date, time, hours, total, status, paid_via)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    const byName = (n) => db.prepare("SELECT * FROM spots WHERE name = ?").get(n);
+    const byName = (n) => one("SELECT * FROM spots WHERE name = $1", [n]);
     const seedBookings = [
       { spot: "Lakshmi Residency", ref: "PS-78421", date: "7 Sep 2026", time: "10:00 AM – 2:00 PM", hours: 4, status: "active", paidVia: "Visa ···· 4242" },
       { spot: "Selva Complex parking", ref: "PS-78390", date: "6 Sep 2026", time: "1:00 PM – 5:00 PM", hours: 4, status: "completed", paidVia: "UPI rajesh@okaxis" },
       { spot: "Lakshmi Residency", ref: "PS-78355", date: "5 Sep 2026", time: "9:00 AM – 12:00 PM", hours: 3, status: "completed", paidVia: "Visa ···· 4242" },
     ];
     for (const b of seedBookings) {
-      const spot = byName(b.spot);
+      const spot = await byName(b.spot);
       if (!spot) continue;
-      bookings += insertBooking.run(driver.id, spot.id, b.ref, b.date, b.time, b.hours,
-        Math.round(spot.price * b.hours * 1.1), b.status, b.paidVia).changes;
+      bookings += (
+        await query(
+          `INSERT INTO bookings (user_id, spot_id, ref, date, time, hours, total, status, paid_via)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [driver.id, spot.id, b.ref, b.date, b.time, b.hours,
+            Math.round(spot.price * b.hours * 1.1), b.status, b.paidVia],
+        )
+      ).count;
     }
 
     // One favourite so the Saved tab isn't empty on first run.
-    const fav = byName("Rajan Towers");
+    const fav = await byName("Rajan Towers");
     if (fav) {
-      db.prepare("INSERT OR IGNORE INTO favourites (user_id, spot_id) VALUES (?, ?)")
-        .run(driver.id, fav.id);
+      await query(
+        "INSERT INTO favourites (user_id, spot_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        [driver.id, fav.id],
+      );
     }
-    db.prepare("INSERT INTO vehicles (user_id, label, plate, type) VALUES (?, ?, ?, ?)")
-      .run(driver.id, "Hyundai i20", "TN 09 BX 4412", "Sedan");
+    await query("INSERT INTO vehicles (user_id, label, plate, type) VALUES ($1, $2, $3, $4)",
+      [driver.id, "Hyundai i20", "TN 09 BX 4412", "Sedan"]);
   }
 
-  // Seeded rows are inserted without a pass token, and a database from an
-  // earlier version has none at all; give every booking one so its QR
-  // resolves. Defined further down the module, which is fine: seed() only
-  // ever runs after the module has finished evaluating.
-  const passTokens = backfillPassTokens();
+  // Seeded rows are inserted without a pass token; give every booking one so
+  // its QR resolves.
+  const passTokens = await backfillPassTokens();
 
   return { users, spots, bookings, passTokens };
 };
@@ -367,8 +363,8 @@ export const distanceMeters = (a, b) => {
 
 const rowToSpot = (r) => ({ ...r, verified: Boolean(r.verified) });
 
-export const listSpots = ({ lat, lng, radius } = {}) => {
-  const rows = db.prepare("SELECT * FROM spots ORDER BY id").all().map(rowToSpot);
+export const listSpots = async ({ lat, lng, radius } = {}) => {
+  const rows = (await all("SELECT * FROM spots ORDER BY id")).map(rowToSpot);
 
   // No origin given: return every spot with no distance attached, so the
   // client can't mistake a missing distance for "0 m away".
@@ -381,31 +377,33 @@ export const listSpots = ({ lat, lng, radius } = {}) => {
     .sort((a, b) => a.distance - b.distance);
 };
 
-export const countSpots = () =>
-  db.prepare("SELECT COUNT(*) AS n FROM spots").get().n;
+export const countSpots = async () =>
+  (await one("SELECT COUNT(*)::int AS n FROM spots")).n;
 
-export const findSpot = (id) => {
-  const row = db.prepare("SELECT * FROM spots WHERE id = ?").get(id);
+export const findSpot = async (id) => {
+  const row = await one("SELECT * FROM spots WHERE id = $1", [id]);
   return row ? rowToSpot(row) : null;
 };
 
-export const createSpot = (s) => {
-  const info = db.prepare(
+export const createSpot = async (s) => {
+  const row = await one(
     `INSERT INTO spots (name, address, type, vehicle, price, rating, reviews,
                         verified, lat, lng, photo, owner, available, since, created_by)
-     VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(s.name, s.address, s.type, s.vehicle, s.price, s.lat, s.lng, s.photo,
-        s.owner, s.available, new Date().getFullYear(), s.createdBy);
-  return findSpot(info.lastInsertRowid);
+     VALUES ($1, $2, $3, $4, $5, 0, 0, 0, $6, $7, $8, $9, $10, $11, $12)
+     RETURNING id`,
+    [s.name, s.address, s.type, s.vehicle, s.price, s.lat, s.lng, s.photo,
+      s.owner, s.available, new Date().getFullYear(), s.createdBy],
+  );
+  return findSpot(row.id);
 };
 
-export const setSpotVerified = (id, verified) => {
-  db.prepare("UPDATE spots SET verified = ? WHERE id = ?").run(verified ? 1 : 0, id);
+export const setSpotVerified = async (id, verified) => {
+  await query("UPDATE spots SET verified = $1 WHERE id = $2", [verified ? 1 : 0, id]);
   return findSpot(id);
 };
 
-export const deleteSpot = (id) =>
-  db.prepare("DELETE FROM spots WHERE id = ?").run(id).changes;
+export const deleteSpot = async (id) =>
+  (await query("DELETE FROM spots WHERE id = $1", [id])).count;
 
 // ─── BOOKINGS ───────────────────────────────────────────
 // Every booking row is returned with its spot nested, so the client never
@@ -418,30 +416,31 @@ const BOOKING_SELECT = `
   JOIN users u ON u.id = b.user_id
 `;
 
-const hydrateBooking = (row) => {
+const hydrateBooking = async (row) => {
   if (!row) return null;
   const { user_name, user_email, ...b } = row;
-  return { ...b, user: { id: row.user_id, name: user_name, email: user_email }, spot: findSpot(row.spot_id) };
+  return { ...b, user: { id: row.user_id, name: user_name, email: user_email }, spot: await findSpot(row.spot_id) };
 };
 
-export const findBooking = (id) =>
-  hydrateBooking(db.prepare(`${BOOKING_SELECT} WHERE b.id = ?`).get(id));
+export const findBooking = async (id) =>
+  hydrateBooking(await one(`${BOOKING_SELECT} WHERE b.id = $1`, [id]));
 
 // Drivers see their own bookings; owners see bookings made against the
 // spots they own; admins see everything.
-export const listBookingsForUser = (user) => {
+export const listBookingsForUser = async (user) => {
   let rows;
   if (user.role === "admin") {
-    rows = db.prepare(`${BOOKING_SELECT} ORDER BY b.id DESC`).all();
+    rows = await all(`${BOOKING_SELECT} ORDER BY b.id DESC`);
   } else if (user.role === "owner") {
-    rows = db.prepare(
-      `${BOOKING_SELECT} WHERE b.spot_id IN (SELECT id FROM spots WHERE created_by = ?)
-       ORDER BY b.id DESC`
-    ).all(user.id);
+    rows = await all(
+      `${BOOKING_SELECT} WHERE b.spot_id IN (SELECT id FROM spots WHERE created_by = $1)
+       ORDER BY b.id DESC`,
+      [user.id],
+    );
   } else {
-    rows = db.prepare(`${BOOKING_SELECT} WHERE b.user_id = ? ORDER BY b.id DESC`).all(user.id);
+    rows = await all(`${BOOKING_SELECT} WHERE b.user_id = $1 ORDER BY b.id DESC`, [user.id]);
   }
-  return rows.map(hydrateBooking);
+  return Promise.all(rows.map(hydrateBooking));
 };
 
 const newRef = () => `PS-${Math.floor(10000 + Math.random() * 90000)}`;
@@ -453,10 +452,11 @@ const newPassToken = () => randomBytes(16).toString("hex");
 
 // Bookings created before pass_token existed (and the seeded rows) need one
 // too, otherwise their QR has nothing to point at.
-export const backfillPassTokens = () => {
-  const rows = db.prepare("SELECT id FROM bookings WHERE pass_token IS NULL").all();
-  const set = db.prepare("UPDATE bookings SET pass_token = ? WHERE id = ?");
-  for (const r of rows) set.run(newPassToken(), r.id);
+export const backfillPassTokens = async () => {
+  const rows = await all("SELECT id FROM bookings WHERE pass_token IS NULL");
+  for (const r of rows) {
+    await query("UPDATE bookings SET pass_token = $1 WHERE id = $2", [newPassToken(), r.id]);
+  }
   return rows.length;
 };
 
@@ -480,8 +480,8 @@ const windowLabel = (startISO, hours) => {
   return `${fmtClock(start)} – ${fmtClock(end)}`;
 };
 
-export const createBooking = ({ userId, spotId, hours, startAt, paidVia = "", paymentStatus = "confirmed" }) => {
-  const spot = findSpot(spotId);
+export const createBooking = async ({ userId, spotId, hours, startAt, paidVia = "", paymentStatus = "confirmed" }) => {
+  const spot = await findSpot(spotId);
   if (!spot) return null;
   // Price is recomputed from the stored spot price rather than trusted
   // from the client, so the total can't be tampered with.
@@ -492,29 +492,32 @@ export const createBooking = ({ userId, spotId, hours, startAt, paidVia = "", pa
 
   let ref = newRef();
   // Guard against the tiny chance of colliding with an existing ref.
-  while (db.prepare("SELECT 1 FROM bookings WHERE ref = ?").get(ref)) ref = newRef();
+  while (await one("SELECT 1 FROM bookings WHERE ref = $1", [ref])) ref = newRef();
 
-  const info = db.prepare(
+  const row = await one(
     `INSERT INTO bookings
        (user_id, spot_id, ref, date, time, hours, total, start_at, paid_via, pass_token, payment_status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(userId, spotId, ref, fmtDay(start), windowLabel(startISO, hours), hours, total,
-        startISO, paidVia, newPassToken(), paymentStatus);
-  return findBooking(info.lastInsertRowid);
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     RETURNING id`,
+    [userId, spotId, ref, fmtDay(start), windowLabel(startISO, hours), hours, total,
+      startISO, paidVia, newPassToken(), paymentStatus],
+  );
+  return findBooking(row.id);
 };
 
 /** Lookup behind the QR code. Keyed on the pass token, never the ref. */
-export const findBookingByPassToken = (token) =>
-  hydrateBooking(db.prepare(`${BOOKING_SELECT} WHERE b.pass_token = ?`).get(token));
+export const findBookingByPassToken = async (token) =>
+  hydrateBooking(await one(`${BOOKING_SELECT} WHERE b.pass_token = $1`, [token]));
 
 /**
  * Records that the owner saw the car in the space. Idempotent: a second
  * scan keeps the first timestamp rather than quietly moving arrival later.
  */
-export const markBookingArrived = (id, byUserId) => {
-  db.prepare(
-    "UPDATE bookings SET arrived_at = datetime('now'), arrived_by = ? WHERE id = ? AND arrived_at IS NULL"
-  ).run(byUserId, id);
+export const markBookingArrived = async (id, byUserId) => {
+  await query(
+    `UPDATE bookings SET arrived_at = ${NOW_TEXT}, arrived_by = $1 WHERE id = $2 AND arrived_at IS NULL`,
+    [byUserId, id],
+  );
   return findBooking(id);
 };
 
@@ -522,22 +525,23 @@ export const markBookingArrived = (id, byUserId) => {
  * Records that the owner has been handed the cash for a booking. Only a
  * cash booking is ever 'pending', so this can't touch an online payment.
  */
-export const confirmCashPayment = (id) => {
-  db.prepare(
-    "UPDATE bookings SET payment_status = 'confirmed' WHERE id = ? AND payment_status = 'pending'"
-  ).run(id);
+export const confirmCashPayment = async (id) => {
+  await query(
+    "UPDATE bookings SET payment_status = 'confirmed' WHERE id = $1 AND payment_status = 'pending'",
+    [id],
+  );
   return findBooking(id);
 };
 
-export const setBookingStatus = (id, status) => {
-  db.prepare("UPDATE bookings SET status = ? WHERE id = ?").run(status, id);
+export const setBookingStatus = async (id, status) => {
+  await query("UPDATE bookings SET status = $1 WHERE id = $2", [status, id]);
   return findBooking(id);
 };
 
-export const extendBooking = (id, extraHours) => {
-  const b = db.prepare("SELECT * FROM bookings WHERE id = ?").get(id);
+export const extendBooking = async (id, extraHours) => {
+  const b = await one("SELECT * FROM bookings WHERE id = $1", [id]);
   if (!b) return null;
-  const spot = findSpot(b.spot_id);
+  const spot = await findSpot(b.spot_id);
   const hours = b.hours + extraHours;
   const total = Math.round(spot.price * hours * 1.1);
 
@@ -545,69 +549,68 @@ export const extendBooking = (id, extraHours) => {
   // their existing label is left alone rather than invented.
   const time = b.start_at ? windowLabel(b.start_at, hours) : b.time;
 
-  db.prepare("UPDATE bookings SET hours = ?, total = ?, time = ? WHERE id = ?")
-    .run(hours, total, time, id);
+  await query("UPDATE bookings SET hours = $1, total = $2, time = $3 WHERE id = $4",
+    [hours, total, time, id]);
   return findBooking(id);
 };
 
-export const countBookings = () =>
-  db.prepare("SELECT COUNT(*) AS n FROM bookings").get().n;
+export const countBookings = async () =>
+  (await one("SELECT COUNT(*)::int AS n FROM bookings")).n;
 
 // Owner earnings: only active/completed bookings count toward revenue.
-export const ownerEarnings = (ownerId) =>
-  db.prepare(
-    `SELECT COALESCE(SUM(b.total), 0) AS revenue, COUNT(*) AS bookings
+export const ownerEarnings = async (ownerId) =>
+  one(
+    `SELECT COALESCE(SUM(b.total), 0)::float AS revenue, COUNT(*)::int AS bookings
      FROM bookings b
      WHERE b.status != 'cancelled'
-       AND b.spot_id IN (SELECT id FROM spots WHERE created_by = ?)`
-  ).get(ownerId);
+       AND b.spot_id IN (SELECT id FROM spots WHERE created_by = $1)`,
+    [ownerId],
+  );
 
 // ─── FAVOURITES ─────────────────────────────────────────
-export const listFavourites = (userId) =>
-  db.prepare(
-    `SELECT spot_id FROM favourites WHERE user_id = ? ORDER BY created_at DESC`
-  ).all(userId).map((r) => r.spot_id);
+export const listFavourites = async (userId) =>
+  (await all("SELECT spot_id FROM favourites WHERE user_id = $1 ORDER BY created_at DESC, spot_id DESC", [userId]))
+    .map((r) => r.spot_id);
 
-export const addFavourite = (userId, spotId) =>
-  db.prepare("INSERT OR IGNORE INTO favourites (user_id, spot_id) VALUES (?, ?)")
-    .run(userId, spotId).changes;
+export const addFavourite = async (userId, spotId) =>
+  (await query(
+    "INSERT INTO favourites (user_id, spot_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+    [userId, spotId],
+  )).count;
 
-export const removeFavourite = (userId, spotId) =>
-  db.prepare("DELETE FROM favourites WHERE user_id = ? AND spot_id = ?")
-    .run(userId, spotId).changes;
+export const removeFavourite = async (userId, spotId) =>
+  (await query("DELETE FROM favourites WHERE user_id = $1 AND spot_id = $2", [userId, spotId])).count;
 
 // ─── VEHICLES ───────────────────────────────────────────
 export const listVehicles = (userId) =>
-  db.prepare("SELECT * FROM vehicles WHERE user_id = ? ORDER BY id").all(userId);
+  all("SELECT * FROM vehicles WHERE user_id = $1 ORDER BY id", [userId]);
 
-export const addVehicle = (userId, { label, plate, type }) => {
-  const info = db.prepare(
-    "INSERT INTO vehicles (user_id, label, plate, type) VALUES (?, ?, ?, ?)"
-  ).run(userId, label, plate, type);
-  return db.prepare("SELECT * FROM vehicles WHERE id = ?").get(info.lastInsertRowid);
-};
+export const addVehicle = (userId, { label, plate, type }) =>
+  one(
+    "INSERT INTO vehicles (user_id, label, plate, type) VALUES ($1, $2, $3, $4) RETURNING *",
+    [userId, label, plate, type],
+  );
 
-export const deleteVehicle = (userId, id) =>
-  db.prepare("DELETE FROM vehicles WHERE id = ? AND user_id = ?").run(id, userId).changes;
+export const deleteVehicle = async (userId, id) =>
+  (await query("DELETE FROM vehicles WHERE id = $1 AND user_id = $2", [id, userId])).count;
 
 // ─── SPOT PHOTOS ────────────────────────────────────────
 export const listSpotPhotos = (userId) =>
-  db.prepare("SELECT * FROM spot_photos WHERE user_id = ? ORDER BY id DESC").all(userId);
+  all("SELECT * FROM spot_photos WHERE user_id = $1 ORDER BY id DESC", [userId]);
 
-export const addSpotPhoto = (userId, path, label = "") => {
-  const info = db.prepare(
-    "INSERT INTO spot_photos (user_id, path, label) VALUES (?, ?, ?)"
-  ).run(userId, path, label);
-  return db.prepare("SELECT * FROM spot_photos WHERE id = ?").get(info.lastInsertRowid);
-};
+export const addSpotPhoto = (userId, path, label = "") =>
+  one(
+    "INSERT INTO spot_photos (user_id, path, label) VALUES ($1, $2, $3) RETURNING *",
+    [userId, path, label],
+  );
 
 export const findSpotPhoto = (userId, path) =>
-  db.prepare("SELECT * FROM spot_photos WHERE user_id = ? AND path = ?").get(userId, path);
+  one("SELECT * FROM spot_photos WHERE user_id = $1 AND path = $2", [userId, path]);
 
-export const deleteSpotPhoto = (userId, id) => {
-  const row = db.prepare("SELECT * FROM spot_photos WHERE id = ? AND user_id = ?").get(id, userId);
+export const deleteSpotPhoto = async (userId, id) => {
+  const row = await one("SELECT * FROM spot_photos WHERE id = $1 AND user_id = $2", [id, userId]);
   if (!row) return null;
-  db.prepare("DELETE FROM spot_photos WHERE id = ?").run(id);
+  await query("DELETE FROM spot_photos WHERE id = $1", [id]);
   return row;
 };
 
@@ -627,8 +630,7 @@ const withRoles = (user) => (user ? { ...user, roles: [user.role] } : user);
 
 // ─── OAUTH IDENTITIES ───────────────────────────────────
 export const findByProvider = (provider, providerId) =>
-  db.prepare(`SELECT ${PUBLIC_COLS} FROM users WHERE provider = ? AND provider_id = ?`)
-    .get(provider, providerId);
+  one(`SELECT ${PUBLIC_COLS} FROM users WHERE provider = $1 AND provider_id = $2`, [provider, providerId]);
 
 /**
  * Resolve an identity-provider profile to a local user.
@@ -639,18 +641,18 @@ export const findByProvider = (provider, providerId) =>
  * would let anyone who can set an email address at the provider take
  * over a local login.
  */
-export const upsertOAuthUser = ({ provider, providerId, email, name, avatar, emailVerified }) => {
-  const existing = findByProvider(provider, providerId);
+export const upsertOAuthUser = async ({ provider, providerId, email, name, avatar, emailVerified }) => {
+  const existing = await findByProvider(provider, providerId);
   if (existing) {
-    db.prepare("UPDATE users SET name = ?, avatar = ? WHERE id = ?")
-      .run(name || existing.name, avatar ?? existing.avatar, existing.id);
-    return { user: findUser(existing.id), created: false, linked: false };
+    await query("UPDATE users SET name = $1, avatar = $2 WHERE id = $3",
+      [name || existing.name, avatar ?? existing.avatar, existing.id]);
+    return { user: await findUser(existing.id), created: false, linked: false };
   }
 
   // Provider sign-in lands on the DRIVER account for the address: that is
   // the role an account created here gets. An owner account on the same
   // email is a different account, and is left alone rather than claimed.
-  const onAddress = email ? findAccountsByEmail(email) : [];
+  const onAddress = email ? await findAccountsByEmail(email) : [];
 
   // An unverified address must not touch ANY account on it, in any role:
   // anyone can set an unverified email at the provider, and creating a
@@ -659,12 +661,12 @@ export const upsertOAuthUser = ({ provider, providerId, email, name, avatar, ema
     return { conflict: "unverified-email" };
   }
 
-  const clash = email ? findAccount(email, "driver") : null;
+  const clash = email ? await findAccount(email, "driver") : null;
 
   if (clash) {
-    db.prepare("UPDATE users SET provider = ?, provider_id = ?, avatar = ? WHERE id = ?")
-      .run(provider, providerId, avatar ?? "", clash.id);
-    return { user: findUser(clash.id), created: false, linked: true };
+    await query("UPDATE users SET provider = $1, provider_id = $2, avatar = $3 WHERE id = $4",
+      [provider, providerId, avatar ?? "", clash.id]);
+    return { user: await findUser(clash.id), created: false, linked: true };
   }
 
   // `email` is NOT NULL, but a provider may withhold it (a private GitHub
@@ -678,13 +680,15 @@ export const upsertOAuthUser = ({ provider, providerId, email, name, avatar, ema
   // part before the generic label, which at least reads as a person.
   const storedName = name || (email ? email.split("@")[0] : "") || "New user";
 
-  const info = db.prepare(
+  const row = await one(
     `INSERT INTO users (name, email, pass_hash, role, provider, provider_id, avatar)
-     VALUES (?, ?, ?, 'driver', ?, ?, ?)`
-  ).run(storedName, storedEmail, OAUTH_ONLY, provider, providerId, avatar ?? "");
+     VALUES ($1, $2, $3, 'driver', $4, $5, $6)
+     RETURNING id`,
+    [storedName, storedEmail, OAUTH_ONLY, provider, providerId, avatar ?? ""],
+  );
 
   return {
-    user: findUser(info.lastInsertRowid),
+    user: await findUser(row.id),
     created: true,
     linked: false,
     placeholderEmail: !email,
@@ -696,29 +700,27 @@ export const upsertOAuthUser = ({ provider, providerId, email, name, avatar, ema
  * Includes pass_hash, so this is for the auth layer only.
  */
 export const findAccount = (email, role) =>
-  db.prepare("SELECT * FROM users WHERE email = ? COLLATE NOCASE AND role = ?")
-    .get(email, role);
+  one("SELECT * FROM users WHERE lower(email) = lower($1) AND role = $2", [email, role]);
 
 /** Every account registered on an address — at most one per role. */
-export const findAccountsByEmail = (email) =>
-  db.prepare(`SELECT ${PUBLIC_COLS} FROM users WHERE email = ? COLLATE NOCASE ORDER BY role`)
-    .all(email)
+export const findAccountsByEmail = async (email) =>
+  (await all(`SELECT ${PUBLIC_COLS} FROM users WHERE lower(email) = lower($1) ORDER BY role`, [email]))
     .map(withRoles);
 
-export const findUser = (id) =>
-  withRoles(db.prepare(`SELECT ${PUBLIC_COLS} FROM users WHERE id = ?`).get(id));
+export const findUser = async (id) =>
+  withRoles(await one(`SELECT ${PUBLIC_COLS} FROM users WHERE id = $1`, [id]));
 
 // Includes pass_hash, for the auth layer only. Callers must strip it
 // before anything reaches a response body.
 export const findUserWithHash = (id) =>
-  db.prepare("SELECT * FROM users WHERE id = ?").get(id);
+  one("SELECT * FROM users WHERE id = $1", [id]);
 
-export const updateUserProfile = (id, { name, email, phone, upiId }) => {
-  db.prepare("UPDATE users SET name = ?, email = ?, phone = ?, upi_id = ? WHERE id = ?")
-    .run(name, email, phone, upiId ?? "", id);
+export const updateUserProfile = async (id, { name, email, phone, upiId }) => {
+  await query("UPDATE users SET name = $1, email = $2, phone = $3, upi_id = $4 WHERE id = $5",
+    [name, email, phone, upiId ?? "", id]);
   // Spot rows carry a denormalised owner display name; keep it in step so
   // an owner renaming themselves doesn't orphan their listings.
-  db.prepare("UPDATE spots SET owner = ? WHERE created_by = ?").run(name, id);
+  await query("UPDATE spots SET owner = $1 WHERE created_by = $2", [name, id]);
   return findUser(id);
 };
 
@@ -730,41 +732,29 @@ export const updateUserProfile = (id, { name, email, phone, upiId }) => {
  * and folding one account's bookings into another's is not something a
  * role dropdown should decide to do.
  */
-export const setUserRole = (id, role) => {
-  const target = db.prepare("SELECT email FROM users WHERE id = ?").get(id);
+export const setUserRole = async (id, role) => {
+  const target = await one("SELECT email FROM users WHERE id = $1", [id]);
   if (!target) return null;
-  const taken = findAccount(target.email, role);
+  const taken = await findAccount(target.email, role);
   if (taken && taken.id !== id) return null;
-  db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, id);
+  await query("UPDATE users SET role = $1 WHERE id = $2", [role, id]);
   return findUser(id);
 };
 
-export const deleteUser = (id) =>
-  db.prepare("DELETE FROM users WHERE id = ?").run(id).changes;
+export const deleteUser = async (id) =>
+  (await query("DELETE FROM users WHERE id = $1", [id])).count;
 
-export const countAdmins = () =>
-  db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'").get().n;
+export const countAdmins = async () =>
+  (await one("SELECT COUNT(*)::int AS n FROM users WHERE role = 'admin'")).n;
 
-export const changePassword = (id, password) => {
-  db.prepare("UPDATE users SET pass_hash = ? WHERE id = ?").run(hashPassword(password), id);
+export const changePassword = async (id, password) => {
+  await query("UPDATE users SET pass_hash = $1 WHERE id = $2", [hashPassword(password), id]);
   return findUser(id);
 };
 
 // ─── PASSWORD RESET TOKENS ──────────────────────────────
-// Only a SHA-256 of the token is stored, so a copy of the database cannot
-// be turned into working reset links. Tokens are 256 random bits, which is
-// why a fast hash is fine here (unlike passwords).
-db.exec(`
-  CREATE TABLE IF NOT EXISTS password_resets (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    email      TEXT NOT NULL COLLATE NOCASE,
-    token_hash TEXT NOT NULL UNIQUE,
-    expires_at TEXT NOT NULL,
-    used_at    TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )
-`);
-
+// Tokens are 256 random bits, which is why a fast hash is fine here
+// (unlike passwords).
 export const RESET_TTL_MINUTES = 30;
 // One email per address per minute, so the form cannot be used to flood
 // someone's inbox or burn through the mail quota.
@@ -777,65 +767,69 @@ const hashToken = (token) => createHash("sha256").update(String(token)).digest("
  * identity provider have no password to reset). Any earlier unused link for
  * the address is revoked, so only the newest email works.
  */
-export const createPasswordReset = (email) => {
-  const account = db
-    .prepare("SELECT name FROM users WHERE email = ? COLLATE NOCASE AND provider = 'local' AND pass_hash <> ? ORDER BY id LIMIT 1")
-    .get(email, OAUTH_ONLY);
+export const createPasswordReset = async (email) => {
+  const account = await one(
+    "SELECT name FROM users WHERE lower(email) = lower($1) AND provider = 'local' AND pass_hash <> $2 ORDER BY id LIMIT 1",
+    [email, OAUTH_ONLY],
+  );
   if (!account) return null;
 
-  const recent = db
-    .prepare("SELECT 1 FROM password_resets WHERE email = ? COLLATE NOCASE AND used_at IS NULL AND created_at > datetime('now', ?)")
-    .get(email, `-${RESET_COOLDOWN_SECONDS} seconds`);
+  const recent = await one(
+    "SELECT 1 FROM password_resets WHERE lower(email) = lower($1) AND used_at IS NULL AND created_at > now() - make_interval(secs => $2::int)",
+    [email, RESET_COOLDOWN_SECONDS],
+  );
   if (recent) return null;
 
-  db.prepare("DELETE FROM password_resets WHERE expires_at < datetime('now') OR used_at IS NOT NULL").run();
-  db.prepare("UPDATE password_resets SET used_at = datetime('now') WHERE email = ? COLLATE NOCASE AND used_at IS NULL").run(email);
+  await query("DELETE FROM password_resets WHERE expires_at < now() OR used_at IS NOT NULL");
+  await query("UPDATE password_resets SET used_at = now() WHERE lower(email) = lower($1) AND used_at IS NULL", [email]);
 
   const token = randomBytes(32).toString("base64url");
-  db.prepare("INSERT INTO password_resets (email, token_hash, expires_at) VALUES (?, ?, datetime('now', ?))")
-    .run(email, hashToken(token), `+${RESET_TTL_MINUTES} minutes`);
+  await query(
+    "INSERT INTO password_resets (email, token_hash, expires_at) VALUES ($1, $2, now() + make_interval(mins => $3::int))",
+    [email, hashToken(token), RESET_TTL_MINUTES],
+  );
   return { token, name: account.name };
 };
 
 const findLiveReset = (token) =>
-  db.prepare("SELECT id, email FROM password_resets WHERE token_hash = ? AND used_at IS NULL AND expires_at > datetime('now')")
-    .get(hashToken(token));
+  one(
+    "SELECT id, email FROM password_resets WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()",
+    [hashToken(token)],
+  );
 
-export const isPasswordResetValid = (token) => Boolean(findLiveReset(token));
+export const isPasswordResetValid = async (token) => Boolean(await findLiveReset(token));
 
 /**
  * Spend a reset token and set the new password on every password-based
  * account at that address (an address can hold one account per role).
  * Returns false when the token is unknown, expired or already used.
  */
-export const consumePasswordReset = (token, password) => {
-  const reset = findLiveReset(token);
+export const consumePasswordReset = async (token, password) => {
+  const reset = await findLiveReset(token);
   if (!reset) return false;
   const hash = hashPassword(password);
-  db.exec("BEGIN");
-  try {
-    db.prepare("UPDATE users SET pass_hash = ? WHERE email = ? COLLATE NOCASE AND provider = 'local' AND pass_hash <> ?")
-      .run(hash, reset.email, OAUTH_ONLY);
-    db.prepare("UPDATE password_resets SET used_at = datetime('now') WHERE id = ?").run(reset.id);
-    db.exec("COMMIT");
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  }
+  await transaction(async (q) => {
+    await q(
+      "UPDATE users SET pass_hash = $1 WHERE lower(email) = lower($2) AND provider = 'local' AND pass_hash <> $3",
+      [hash, reset.email, OAUTH_ONLY],
+    );
+    await q("UPDATE password_resets SET used_at = now() WHERE id = $1", [reset.id]);
+  });
   return true;
 };
 
-export const listUsers = () =>
-  db.prepare(`SELECT ${PUBLIC_COLS} FROM users ORDER BY id`).all().map(withRoles);
+export const listUsers = async () =>
+  (await all(`SELECT ${PUBLIC_COLS} FROM users ORDER BY id`)).map(withRoles);
 
 export const countUsers = () =>
-  db.prepare("SELECT role, COUNT(*) AS n FROM users GROUP BY role").all();
+  all("SELECT role, COUNT(*)::int AS n FROM users GROUP BY role");
 
-export const createUser = ({ name, email, password, role }) => {
-  const info = db
-    .prepare("INSERT INTO users (name, email, pass_hash, role) VALUES (?, ?, ?, ?)")
-    .run(name, email, hashPassword(password), role);
-  return findUser(info.lastInsertRowid);
+export const createUser = async ({ name, email, password, role }) => {
+  const row = await one(
+    "INSERT INTO users (name, email, pass_hash, role) VALUES ($1, $2, $3, $4) RETURNING id",
+    [name, email, hashPassword(password), role],
+  );
+  return findUser(row.id);
 };
 
 const stripHash = (row) => {
@@ -849,8 +843,8 @@ const stripHash = (row) => {
  * The role is part of the identity, so a driver password will not open the
  * owner account on the same address even though the email is identical.
  */
-export const authenticate = (email, password, role) => {
-  const row = findAccount(email, role);
+export const authenticate = async (email, password, role) => {
+  const row = await findAccount(email, role);
   if (!row || !verifyPassword(password, row.pass_hash)) return null;
   return stripHash(row);
 };
@@ -865,19 +859,17 @@ export const authenticate = (email, password, role) => {
  * and owner accounts matches both, and only then must the caller ask which
  * one was meant.
  */
-export const authenticateAny = (email, password) =>
-  db
-    .prepare("SELECT * FROM users WHERE email = ? COLLATE NOCASE ORDER BY role")
-    .all(email)
+export const authenticateAny = async (email, password) =>
+  (await all("SELECT * FROM users WHERE lower(email) = lower($1) ORDER BY role", [email]))
     .filter((row) => verifyPassword(password, row.pass_hash))
     .map(stripHash);
 
 /** Re-check the signed-in account's own password, by id. */
-export const authenticateById = (id, password) => {
-  const row = findUserWithHash(id);
+export const authenticateById = async (id, password) => {
+  const row = await findUserWithHash(id);
   if (!row || !verifyPassword(password, row.pass_hash)) return null;
   return stripHash(row);
 };
 
-export { SEED_USERS };
-export default db;
+// Exposed for the maintenance scripts (reset.js, db-query.mjs) only.
+export { SEED_USERS, query, all, one };

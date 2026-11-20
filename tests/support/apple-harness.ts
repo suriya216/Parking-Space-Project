@@ -72,9 +72,8 @@ export interface AppleEnvironment {
 }
 
 export const startAppleEnvironment = async (): Promise<AppleEnvironment> => {
-  for (const suffix of ["", "-shm", "-wal"]) {
-    rmSync(TEST_DB + suffix, { force: true });
-  }
+  /* The database is a PGlite directory, not a single file. */
+  rmSync(TEST_DB, { recursive: true, force: true });
 
   /* Apple's token-signing keypair (RS256), published via JWKS. */
   const idTokenKeys = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -260,6 +259,8 @@ export const startAppleEnvironment = async (): Promise<AppleEnvironment> => {
       ...process.env,
       PORT: String(APPLE_API_PORT),
       PARKSPACE_DB: TEST_DB,
+      /* Never the real database: the suite resets and deletes accounts. */
+      DATABASE_URL: "",
       APPLE_CLIENT_ID,
       APPLE_TEAM_ID,
       APPLE_KEY_ID,

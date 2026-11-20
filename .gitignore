@@ -18,6 +18,9 @@ server/*.db
 server/*.db-shm
 server/*.db-wal
 
+# Local PGlite database (Postgres in WASM) used when DATABASE_URL is unset
+server/pgdata/
+
 # Owner-uploaded spot photos
 server/uploads/
 

@@ -63,9 +63,8 @@ export interface OauthEnvironment {
 }
 
 export const startOauthEnvironment = async (): Promise<OauthEnvironment> => {
-  for (const suffix of ["", "-shm", "-wal"]) {
-    rmSync(TEST_DB + suffix, { force: true });
-  }
+  /* The database is a PGlite directory, not a single file. */
+  rmSync(TEST_DB, { recursive: true, force: true });
 
   const issued = new Map<string, IssuedCode>();
   const log: string[] = [];
@@ -177,6 +176,8 @@ export const startOauthEnvironment = async (): Promise<OauthEnvironment> => {
       ...process.env,
       PORT: String(OAUTH_API_PORT),
       PARKSPACE_DB: TEST_DB,
+      /* Never the real database: the suite resets and deletes accounts. */
+      DATABASE_URL: "",
       GOOGLE_CLIENT_ID: CLIENT_ID,
       GOOGLE_CLIENT_SECRET: CLIENT_SECRET,
       GOOGLE_AUTH_URL: `http://localhost:${IDP_PORT}/authorize`,
