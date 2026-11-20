@@ -594,8 +594,18 @@ app.get("/api/spots", handler(async (req, res) => {
     return res.status(400).json({ error: "lat or lng is out of range." });
   }
 
+  // Who is asking decides which listings they may see: real accounts never
+  // see the seeded demo ones. A missing or invalid token is a signed-out
+  // request, which keeps the public listing as it has always been.
+  let viewer = null;
+  try {
+    viewer = await currentUser(req);
+  } catch {
+    viewer = null;
+  }
+
   res.json({
-    spots: (await db.listSpots({ lat, lng, radius })),
+    spots: (await db.listSpots({ lat, lng, radius, viewer })),
     center: lat != null ? { lat, lng } : db.DEFAULT_CENTER,
     usedFallbackCenter: lat == null,
   });
@@ -740,7 +750,7 @@ app.post("/api/payments/order", requireUser, handler(async (req, res) => {
     return res.status(400).json({ error: "Hours must be a whole number from 1 to 24." });
   }
   const spot = (await db.findSpot(sid));
-  if (!spot) return res.status(404).json({ error: "Spot not found." });
+  if (!spot || !db.canSeeSpot(req.user, spot)) return res.status(404).json({ error: "Spot not found." });
 
   const amountPaise = Math.round(spot.price * h * 1.1) * 100;
   const order = await payments.createOrder(amountPaise, `spot${sid}-${Date.now()}`);
@@ -777,7 +787,10 @@ app.post("/api/bookings", requireUser, handler(async (req, res) => {
   if (!Number.isInteger(h) || h < 1 || h > 24) {
     return res.status(400).json({ error: "Hours must be a whole number from 1 to 24." });
   }
-  if (!(await db.findSpot(sid))) return res.status(404).json({ error: "Spot not found." });
+  const wanted = await db.findSpot(sid);
+  if (!wanted || !db.canSeeSpot(req.user, wanted)) {
+    return res.status(404).json({ error: "Spot not found." });
+  }
 
   // The date and time window are derived server-side from the start
   // instant, so a client can't submit a label that disagrees with the
@@ -948,7 +961,8 @@ app.get("/api/favourites", requireUser, handler(async (req, res) => {
 
 app.put("/api/favourites/:spotId", requireUser, handler(async (req, res) => {
   const id = asId(req.params.spotId);
-  if (!id || !(await db.findSpot(id))) return res.status(404).json({ error: "Spot not found." });
+  const spot = id && (await db.findSpot(id));
+  if (!spot || !db.canSeeSpot(req.user, spot)) return res.status(404).json({ error: "Spot not found." });
   (await db.addFavourite(req.user.id, id));
   res.json({ favourites: (await db.listFavourites(req.user.id)) });
 }));

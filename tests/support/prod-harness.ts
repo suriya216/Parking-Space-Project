@@ -54,6 +54,8 @@ export const startProdServer = async (
       DATA_DIR: dataDir,
       /* Never the real database: the suite resets and deletes accounts. */
       DATABASE_URL: "",
+      /* Production behaviour: real accounts must not see the demo listings. */
+      DEMO_SPOTS_FOR_ALL: "",
       SESSION_SECRET: secret,
       DEMO_MODE: "false",
     },

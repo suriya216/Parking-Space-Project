@@ -226,6 +226,78 @@ test.describe("security headers", () => {
   });
 });
 
+test.describe("demo listings are hidden from real accounts", () => {
+  type Listing = { id: number; name: string };
+
+  const registerReal = async (role: "driver" | "owner") => {
+    const email = `real-${role}-${Date.now().toString(36)}@example.com`;
+    const password = "RealPass@123";
+    const reg = await prod.json("/api/register", {
+      method: "POST",
+      body: { name: `Real ${role}`, email, password, role },
+    });
+    expect(reg.status).toBe(201);
+    return loginAs({ email, password });
+  };
+
+  const spotsFor = async (token?: string) => {
+    const res = await prod.json<{ spots: Listing[] }>("/api/spots", { token });
+    expect(res.status).toBe(200);
+    return res.data.spots;
+  };
+
+  test("a seeded account sees the six demo spots, a real driver sees none", async () => {
+    const seeded = await loginAs(SEED_DRIVER);
+    expect((await spotsFor(seeded.token)).length).toBeGreaterThanOrEqual(6);
+
+    const real = await registerReal("driver");
+    expect(await spotsFor(real.token)).toEqual([]);
+  });
+
+  test("a spot a real owner lists is a real spot, visible to real drivers", async () => {
+    const owner = await registerReal("owner");
+    const created = await prod.json<{ spot: Listing }>("/api/spots", {
+      method: "POST",
+      token: owner.token,
+      body: {
+        name: "Real Owner Garage",
+        address: "1 Real Street, Chennai",
+        type: "Covered",
+        vehicle: "Sedan",
+        price: 30,
+        lat: 13.04,
+        lng: 80.24,
+        available: "Daily",
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const driver = await registerReal("driver");
+    const seen = await spotsFor(driver.token);
+    expect(seen.map((s) => s.name)).toEqual(["Real Owner Garage"]);
+
+    /* Seeded accounts still see everything, real listings included. */
+    const seeded = await loginAs(SEED_DRIVER);
+    expect((await spotsFor(seeded.token)).map((s) => s.name)).toContain("Real Owner Garage");
+  });
+
+  test("a real driver cannot book or favourite a demo spot by id", async () => {
+    const seeded = await loginAs(SEED_DRIVER);
+    const demo = (await spotsFor(seeded.token))[0]!;
+    const real = await registerReal("driver");
+
+    const booking = await prod.json("/api/bookings", {
+      method: "POST",
+      token: real.token,
+      body: { spotId: demo.id, hours: 1 },
+    });
+    expect(booking.status).toBe(404);
+
+    const fav = await prod.json(`/api/favourites/${demo.id}`, { method: "PUT", token: real.token });
+    expect(fav.status).toBe(404);
+  });
+});
+
 test.describe("login rate limiting", () => {
   /* Slower than the rest: ~85 sequential logins by design. */
   test.setTimeout(180_000);
