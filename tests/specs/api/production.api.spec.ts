@@ -211,7 +211,7 @@ test.describe("security headers", () => {
     expect(header("strict-transport-security")).toContain("max-age");
     expect(header("content-security-policy")).toContain("default-src 'self'");
     /* The map would break without this, so it is a real requirement. */
-    expect(header("content-security-policy")).toContain("tile.openstreetmap.org");
+    expect(header("content-security-policy")).toContain("server.arcgisonline.com");
     expect(header("content-security-policy")).toContain("frame-ancestors 'none'");
     expect(header("x-content-type-options")).toBe("nosniff");
     expect(header("x-frame-options")).toBe("DENY");
