@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { MapContainer, Marker, TileLayer, useMapEvents } from "react-leaflet";
+import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import QRCode from "qrcode";
 // Test ids come from the shared contract the Playwright locator layer
@@ -30,6 +30,7 @@ import { useConfirm } from "./hooks/useConfirm";
 // (the read-only one on spot detail, and the add-spot location picker)
 // still compose react-leaflet directly, and reuse the price marker.
 import { MapView, priceIcon } from "./map";
+import { TILE_MAX_ZOOM, TILE_URL } from "./map/tiles";
 import { AuthScreen, ResetPasswordScreen } from "./screens/auth";
 
 // ─── SEARCH WITH SUGGESTIONS ────────────────────────────
@@ -427,7 +428,7 @@ const DetailScreen = ({ spot, onBack, onBook, units = "km", defaultHours = 2, is
             attributionControl={false}
             style={{ width: "100%", height: "100%" }}
           >
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" maxZoom={19} />
+            <TileLayer url={TILE_URL} maxZoom={TILE_MAX_ZOOM} />
             <Marker position={[spot.lat, spot.lng]} icon={priceIcon(spot, true)} />
           </MapContainer>
         </div>
@@ -864,7 +865,7 @@ const PassScreen = ({ passToken, authToken, onExit }) => {
             variant="secondary"
             full
             onClick={() => window.open(
-              `https://www.openstreetmap.org/directions?to=${pass.spot.lat},${pass.spot.lng}`,
+              `https://www.google.com/maps/dir/?api=1&destination=${pass.spot.lat},${pass.spot.lng}&travelmode=driving`,
               "_blank", "noopener"
             )}
           >
@@ -1285,6 +1286,159 @@ const LocationPicker = ({ value, onChange }) => {
   return <Marker position={[value.lat, value.lng]} alt="Selected spot location" />;
 };
 
+// Moves the picker map whenever the chosen point changes from outside the
+// map (device fix or a searched place), keeping the current zoom for taps.
+const FlyToValue = ({ value, zoom }) => {
+  const map = useMap();
+  useEffect(() => {
+    map.setView([value.lat, value.lng], zoom ?? map.getZoom());
+  }, [map, value.lat, value.lng, zoom]);
+  return null;
+};
+
+// Where the spot is: defaults to the device's own location, with a button
+// to re-pin it, a place/area search, and tap-to-adjust on the map.
+const SpotLocationPicker = ({ coords, onChange, onPlace }) => {
+  const { location, status, request } = useGeolocation();
+  const [query, setQuery] = useState("");
+  const [places, setPlaces] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [source, setSource] = useState("default");
+  const [zoom, setZoom] = useState(14);
+  // Only the first device fix may move the pin on its own; after the owner
+  // has chosen something, a late GPS reply must not override it.
+  const touched = useRef(false);
+  const wantDevice = useRef(false);
+  // The text of the place just chosen, so filling the box doesn't re-search.
+  const picked = useRef("");
+
+  useEffect(() => {
+    if (!location) return;
+    if (touched.current && !wantDevice.current) return;
+    wantDevice.current = false;
+    touched.current = true;
+    onChange({ lat: location.lat, lng: location.lng });
+    setSource("device");
+    setZoom(16);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location]);
+
+  const q = query.trim();
+  useEffect(() => {
+    if (q.length < 3 || q === picked.current) { setPlaces([]); setSearching(false); return; }
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(() => {
+      api.searchPlaces(q)
+        .then(list => { if (!cancelled) setPlaces(list); })
+        .finally(() => { if (!cancelled) setSearching(false); });
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [q]);
+
+  const useDevice = () => {
+    touched.current = true;
+    wantDevice.current = true;
+    if (location) {
+      onChange({ lat: location.lat, lng: location.lng });
+      setSource("device");
+      setZoom(16);
+      wantDevice.current = false;
+    } else {
+      request();
+    }
+  };
+
+  const pickPlace = (p) => {
+    touched.current = true;
+    onChange({ lat: p.lat, lng: p.lng });
+    onPlace?.(p);
+    setSource("search");
+    setZoom(16);
+    picked.current = p.name.trim();
+    setQuery(p.name);
+    setPlaces([]);
+  };
+
+  const mapTap = (pos) => {
+    touched.current = true;
+    onChange(pos);
+    setSource("manual");
+    setZoom(undefined);
+  };
+
+  const sourceText = {
+    default: status === "pending" ? "Finding your current location…" : "Tap the map or search to place your spot",
+    device: "Using your current location",
+    search: "Using the searched place",
+    manual: "Using the point you tapped",
+  }[source];
+
+  return (
+    <div>
+      <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.g700, display: "block", marginBottom: 6 }}>
+        Location
+      </span>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search a place or area name"
+            aria-label="Search a place or area"
+            style={{
+              width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 10,
+              border: `1.5px solid ${COLORS.g300}`, fontSize: Math.max(14, MIN_INPUT_FONT), fontFamily: fontB,
+            }}
+          />
+          {q.length >= 3 && places.length > 0 && (
+            <div style={{
+              position: "absolute", top: "100%", left: 0, right: 0, zIndex: 1000, marginTop: 4,
+              background: COLORS.white, border: `1px solid ${COLORS.g200}`, borderRadius: 10,
+              boxShadow: "0 6px 20px rgba(0,0,0,0.12)", maxHeight: 220, overflowY: "auto",
+            }}>
+              {places.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => pickPlace(p)}
+                  style={{
+                    width: "100%", display: "block", padding: "10px 12px", background: "none", border: "none",
+                    borderBottom: `1px solid ${COLORS.g100}`, cursor: "pointer", textAlign: "left", fontFamily: fontB,
+                  }}
+                >
+                  <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: COLORS.navy }}>{p.name}</span>
+                  <span style={{ display: "block", fontSize: 11, color: COLORS.textSecondary }}>{p.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <Btn size="sm" variant="outline" onClick={useDevice}>
+          <Icon name="nav" size={15} color={COLORS.blue} /> My location
+        </Btn>
+      </div>
+      {searching && <div style={{ fontSize: 11, color: COLORS.textTertiary, marginBottom: 6 }}>Searching…</div>}
+      {status === "denied" && source !== "search" && source !== "manual" && (
+        <div style={{ fontSize: 11, color: COLORS.textError, marginBottom: 6 }}>
+          Location access is off, so search for a place or tap the map instead.
+        </div>
+      )}
+
+      <div style={{ height: 190, borderRadius: 12, overflow: "hidden", border: `1px solid ${COLORS.g300}`, marginBottom: 6 }}>
+        <MapContainer center={[coords.lat, coords.lng]} zoom={14} style={{ width: "100%", height: "100%" }}>
+          <TileLayer url={TILE_URL} maxZoom={TILE_MAX_ZOOM} />
+          <FlyToValue value={coords} zoom={zoom} />
+          <LocationPicker value={coords} onChange={mapTap} />
+        </MapContainer>
+      </div>
+      <div style={{ fontSize: 11, color: COLORS.textSecondary, marginBottom: 4 }}>
+        {sourceText} · {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
+      </div>
+    </div>
+  );
+};
+
 // Downscale before upload: a phone photo is several MB and 1280px wide is
 // plenty for a listing thumbnail, so this keeps uploads fast and well
 // inside the server's size limit.
@@ -1511,18 +1665,11 @@ const AddSpotSheet = ({ token, onClose, onCreated }) => {
         onChange={(photo) => setForm(f => ({ ...f, photo }))}
       />
 
-      <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.g700, display: "block", marginBottom: 6 }}>
-        Location — tap the map to place your spot
-      </span>
-      <div style={{ height: 190, borderRadius: 12, overflow: "hidden", border: `1px solid ${COLORS.g300}`, marginBottom: 6 }}>
-        <MapContainer center={[coords.lat, coords.lng]} zoom={14} style={{ width: "100%", height: "100%" }}>
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" maxZoom={19} />
-          <LocationPicker value={coords} onChange={setCoords} />
-        </MapContainer>
-      </div>
-      <div style={{ fontSize: 11, color: COLORS.textSecondary, marginBottom: 4 }}>
-        {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
-      </div>
+      <SpotLocationPicker
+        coords={coords}
+        onChange={setCoords}
+        onPlace={(p) => setForm(f => (f.address.trim() ? f : { ...f, address: p.label }))}
+      />
     </Sheet>
   );
 };
@@ -2360,7 +2507,7 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
                       <Btn
                         size="sm"
                         variant="ghost"
-                        onClick={() => window.open(`https://www.openstreetmap.org/directions?to=${b.spot.lat},${b.spot.lng}`, "_blank", "noopener")}
+                        onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${b.spot.lat},${b.spot.lng}&travelmode=driving`, "_blank", "noopener")}
                       >
                         Directions
                       </Btn>

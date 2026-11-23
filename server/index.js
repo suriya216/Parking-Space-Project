@@ -61,8 +61,8 @@ app.use((_req, res, next) => {
       // React inlines styles, and Leaflet builds marker markup as HTML.
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
-      // OSM raster tiles, and QR codes rendered to data: URLs.
-      "img-src 'self' data: blob: https://*.tile.openstreetmap.org",
+      // Esri map tiles, and QR codes rendered to data: URLs.
+      "img-src 'self' data: blob: https://server.arcgisonline.com",
       // The geocoder, called directly when the server proxy can't reach it.
       "connect-src 'self' https://nominatim.openstreetmap.org",
       "frame-ancestors 'none'",

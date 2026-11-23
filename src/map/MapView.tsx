@@ -1,4 +1,5 @@
 import { Circle, MapContainer, Marker, Popup, TileLayer, ZoomControl } from "react-leaflet";
+import { TILE_ATTRIBUTION, TILE_MAX_ZOOM, TILE_URL } from "./tiles";
 
 import { COLORS } from "../theme";
 import { cx } from "../styles/cx";
@@ -49,11 +50,7 @@ export const MapView = ({
     zoomControl={false}
     className={cx(s.map, picking && s.picking)}
   >
-    <TileLayer
-      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-      maxZoom={19}
-    />
+    <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} maxZoom={TILE_MAX_ZOOM} />
     {/* Bottom-left keeps it clear of the recentre button and the filter
         button in the top-right corner. Hidden entirely on touch — see
         src/styles/leaflet.css. */}
