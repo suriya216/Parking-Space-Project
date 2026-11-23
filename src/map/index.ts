@@ -9,3 +9,6 @@ export type {
 } from "./controls";
 
 export { pinIcon, priceIcon, userIcon } from "./markers";
+
+export { RouteSheet } from "./RouteSheet";
+export type { RouteSheetProps } from "./RouteSheet";

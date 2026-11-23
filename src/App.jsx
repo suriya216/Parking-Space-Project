@@ -29,7 +29,7 @@ import { useConfirm } from "./hooks/useConfirm";
 // MapView owns the main Leaflet surface. The two small inline maps below
 // (the read-only one on spot detail, and the add-spot location picker)
 // still compose react-leaflet directly, and reuse the price marker.
-import { MapView, priceIcon } from "./map";
+import { MapView, RouteSheet, pinIcon, priceIcon } from "./map";
 import { TILE_MAX_ZOOM, TILE_URL } from "./map/tiles";
 import { AuthScreen, ResetPasswordScreen } from "./screens/auth";
 
@@ -880,6 +880,7 @@ const PassScreen = ({ passToken, authToken, onExit }) => {
 
 // ─── BOOKING CONFIRMATION ───────────────────────────────
 const ConfirmScreen = ({ booking, onDone }) => {
+  const [showRoute, setShowRoute] = useState(false);
   useBackGuard(true, onDone);
 
   // Determine the header text based on payment status
@@ -956,15 +957,15 @@ const ConfirmScreen = ({ booking, onDone }) => {
         <Btn
           variant="secondary"
           full
-          onClick={() => window.open(
-            `https://www.openstreetmap.org/directions?to=${booking.spot.lat},${booking.spot.lng}`,
-            "_blank", "noopener"
-          )}
+          onClick={() => setShowRoute(true)}
         >
           Get directions
         </Btn>
         <Btn variant="outline" full testId={TID.confirmDone} onClick={onDone}>Done</Btn>
       </div>
+      {showRoute && (
+        <RouteSheet destination={booking.spot} name={booking.spot.name} onClose={() => setShowRoute(false)} />
+      )}
     </div>
   </div>
   );
@@ -1283,7 +1284,7 @@ const LocationPicker = ({ value, onChange }) => {
   useMapEvents({ click: (e) => onChange({ lat: e.latlng.lat, lng: e.latlng.lng }) });
   // Leaflet drops an empty alt, leaving the attribute off entirely, so
   // give the marker a real description.
-  return <Marker position={[value.lat, value.lng]} alt="Selected spot location" />;
+  return <Marker position={[value.lat, value.lng]} icon={pinIcon} alt="Selected spot location" />;
 };
 
 // Moves the picker map whenever the chosen point changes from outside the
@@ -2001,6 +2002,7 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
   // The booking whose QR pass is open, so it survives leaving the
   // confirmation screen.
   const [passBooking, setPassBooking] = useState(null);
+  const [routeBooking, setRouteBooking] = useState(null);
   const [advanced, setAdvanced] = useState({ maxPrice: 0, verifiedOnly: false, sort: "distance" });
   const { confirm, dialog: confirmDialog } = useConfirm();
 
@@ -2507,7 +2509,7 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
                       <Btn
                         size="sm"
                         variant="ghost"
-                        onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${b.spot.lat},${b.spot.lng}&travelmode=driving`, "_blank", "noopener")}
+                        onClick={() => setRouteBooking(b)}
                       >
                         Directions
                       </Btn>
@@ -2643,6 +2645,9 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
       )}
       {/* Not part of `sheet`: the pass is opened from a specific booking
           row, so it carries that booking rather than a bare name. */}
+      {routeBooking && (
+        <RouteSheet destination={routeBooking.spot} name={routeBooking.spot.name} onClose={() => setRouteBooking(null)} />
+      )}
       {passBooking && (
         <BookingPassSheet booking={passBooking} onClose={() => setPassBooking(null)} />
       )}

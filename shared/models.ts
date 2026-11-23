@@ -190,6 +190,16 @@ export interface Place {
   lng: number;
 }
 
+/** A driving route: the fastest of the alternatives the router offered. */
+export interface RouteInfo {
+  /** Metres. */
+  distance: number;
+  /** Seconds, without live traffic. */
+  duration: number;
+  /** The path as [lat, lng] pairs, ready for a Leaflet polyline. */
+  path: [number, number][];
+}
+
 export interface OwnerEarnings {
   total: number;
   bookings: number;

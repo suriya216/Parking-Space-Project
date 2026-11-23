@@ -64,7 +64,7 @@ app.use((_req, res, next) => {
       // Esri map tiles, and QR codes rendered to data: URLs.
       "img-src 'self' data: blob: https://server.arcgisonline.com",
       // The geocoder, called directly when the server proxy can't reach it.
-      "connect-src 'self' https://nominatim.openstreetmap.org",
+      "connect-src 'self' https://nominatim.openstreetmap.org https://router.project-osrm.org",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",
@@ -1137,6 +1137,62 @@ app.get("/api/places", async (req, res) => {
     const cause = e.cause?.code ?? e.message;
     console.warn(`[api] place search failed: ${cause}`);
     res.status(503).json({ error: `Place search unavailable: ${cause}`, places: [] });
+  }
+});
+
+// ─── DRIVING ROUTE ──────────────────────────────────────
+// The in-app mini map asks for the fastest drive from the driver to a booked
+// spot. Proxied for the same reasons as place search, and cached so reopening
+// the sheet does not re-query a free public router. The OSRM demo server is
+// fine at this scale; a busy deployment should point OSRM_URL at its own.
+const OSRM = (process.env.OSRM_URL ?? "https://router.project-osrm.org").replace(/\/+$/, "");
+const routeCache = new Map(); // "lat,lng>lat,lng" -> { at, route }
+const ROUTE_TTL_MS = 5 * 60_000;
+
+const parsePoint = (v) => {
+  const [lat, lng] = String(v ?? "").split(",").map(Number);
+  const ok = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+  return ok ? { lat, lng } : null;
+};
+
+app.get("/api/route", async (req, res) => {
+  const from = parsePoint(req.query.from);
+  const to = parsePoint(req.query.to);
+  if (!from || !to) return res.status(400).json({ error: "Give from and to as lat,lng." });
+
+  // About 11 m of precision: a driver standing still should hit the cache.
+  const key = [from, to].map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`).join(">");
+  const hit = routeCache.get(key);
+  if (hit && Date.now() - hit.at < ROUTE_TTL_MS) return res.json({ route: hit.route, cached: true });
+
+  const url = `${OSRM}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?${new URLSearchParams({
+    overview: "full", geometries: "geojson", alternatives: "true",
+  })}`;
+
+  try {
+    const upstream = await fetch(url, {
+      headers: { "User-Agent": "ParkSpace/0.0 (demo app)" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!upstream.ok) throw new Error(`router returned ${upstream.status}`);
+    const data = await upstream.json();
+    if (data.code !== "Ok" || !data.routes?.length) {
+      return res.status(404).json({ error: "No driving route found between these points." });
+    }
+    // The router ranks its own primary route; take the quickest explicitly.
+    const best = data.routes.reduce((a, b) => (b.duration < a.duration ? b : a));
+    const route = {
+      distance: best.distance,
+      duration: best.duration,
+      path: best.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+    };
+    if (routeCache.size > 500) routeCache.clear();
+    routeCache.set(key, { at: Date.now(), route });
+    res.json({ route });
+  } catch (e) {
+    const cause = e.cause?.code ?? e.message;
+    console.warn(`[api] route lookup failed: ${cause}`);
+    res.status(503).json({ error: `Route lookup unavailable: ${cause}` });
   }
 });
 

@@ -20,6 +20,8 @@ import type {
   User,
   Vehicle,
   AdminStats,
+  LatLng,
+  RouteInfo,
 } from "@shared/models";
 
 const SESSION_KEY = "parkspace.session";
@@ -406,6 +408,49 @@ const normalisePlaces = (rows: NominatimRow[]): Place[] =>
     lat: Number(r.lat),
     lng: Number(r.lon),
   }));
+
+// ─── DRIVING ROUTE ──────────────────────────────────────
+// Same two-path shape as place search: the server proxy first, then the
+// public router straight from the browser (which trusts the corporate CA that
+// Node may not). Both ask for alternatives and keep the quickest.
+const OSRM_DIRECT = "https://router.project-osrm.org";
+
+interface OsrmRoute {
+  distance: number;
+  duration: number;
+  geometry: { coordinates: [number, number][] };
+}
+
+export const getRoute = async (from: LatLng, to: LatLng): Promise<RouteInfo> => {
+  const pt = (p: LatLng): string => `${p.lat},${p.lng}`;
+  try {
+    const d = await request<{ route: RouteInfo }>(`/route?from=${pt(from)}&to=${pt(to)}`);
+    return d.route;
+  } catch (e) {
+    // A real "no route" answer is final; only an unreachable proxy falls through.
+    if (e instanceof ApiError && !e.retryable && e.status !== 503) throw e;
+  }
+
+  const url = `${OSRM_DIRECT}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?${new URLSearchParams({
+    overview: "full", geometries: "geojson", alternatives: "true",
+  })}`;
+  let data: { code: string; routes?: OsrmRoute[] };
+  try {
+    const res = await fetch(url);
+    data = await res.json();
+  } catch {
+    throw new ApiError("Couldn't load the route. Check your connection and try again.", { retryable: true });
+  }
+  if (data.code !== "Ok" || !data.routes?.length) {
+    throw new ApiError("No driving route found to this spot.", { retryable: false });
+  }
+  const best = data.routes.reduce((a, b) => (b.duration < a.duration ? b : a));
+  return {
+    distance: best.distance,
+    duration: best.duration,
+    path: best.geometry.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]),
+  };
+};
 
 export const searchPlaces = async (q: string): Promise<Place[]> => {
   try {
