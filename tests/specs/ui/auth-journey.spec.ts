@@ -184,11 +184,11 @@ test.describe("OAuth return and session expiry", () => {
     await signIn("driver");
 
     await page.evaluate((key) => {
-      const raw = window.localStorage.getItem(key);
+      const raw = window.sessionStorage.getItem(key);
       if (!raw) throw new Error("no session to tamper with");
       const session = JSON.parse(raw) as { token: string };
       session.token = "bogus.token";
-      window.localStorage.setItem(key, JSON.stringify(session));
+      window.sessionStorage.setItem(key, JSON.stringify(session));
     }, SESSION_STORAGE_KEY);
     await page.reload({ waitUntil: "domcontentloaded" });
 
@@ -197,7 +197,7 @@ test.describe("OAuth return and session expiry", () => {
     const body = (await page.locator("body").textContent()) ?? "";
     expect(body).not.toMatch(/\b401\b/);
 
-    const stored = await page.evaluate((key) => window.localStorage.getItem(key), SESSION_STORAGE_KEY);
+    const stored = await page.evaluate((key) => window.sessionStorage.getItem(key), SESSION_STORAGE_KEY);
     expect(stored).toBeNull();
 
     await authPage.el.noticeDismiss.click();
