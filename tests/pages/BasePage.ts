@@ -46,7 +46,7 @@ export abstract class BasePage {
    */
   async resetSession(): Promise<void> {
     await this.page.goto("/", { waitUntil: "domcontentloaded" });
-    await this.page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+    await this.page.evaluate(() => localStorage.clear());
     await this.page.reload({ waitUntil: "domcontentloaded" });
     await this.waitForApp();
   }

@@ -19,19 +19,10 @@ const IS_PROD = process.env.NODE_ENV === "production";
 // default in production; DEMO_MODE=true re-enables them deliberately.
 const DEMO_MODE = (process.env.DEMO_MODE ?? String(!IS_PROD)) === "true";
 
-// Behind a reverse proxy (Render, Fly, nginx, ...) the app sees an internal
+// Behind Fly's proxy (and most others) the app sees an internal
 // connection. This makes req.protocol/req.ip reflect the real client,
 // which matters for building absolute URLs and for rate limiting.
-//
-// Trusting any X-Forwarded-For lets a client invent an IP per request and
-// walk past the rate limiter, so only a set number of proxy hops is
-// believed. Set TRUST_PROXY to match the deployment (default: one hop in
-// production, none locally).
-const TRUST_PROXY = process.env.TRUST_PROXY ?? (IS_PROD ? "1" : "false");
-const trustProxySetting = /^\d+$/.test(TRUST_PROXY)
-  ? Number(TRUST_PROXY)
-  : TRUST_PROXY === "true" ? true : TRUST_PROXY === "false" ? false : TRUST_PROXY;
-app.set("trust proxy", trustProxySetting);
+app.set("trust proxy", true);
 // Don't advertise the framework.
 app.disable("x-powered-by");
 
@@ -90,60 +81,45 @@ app.use((_req, res, next) => {
 // definition, produces failures.
 //
 // A fixed window per IP is crude but enough to make online guessing
-// impractical. A deployment behind a CDN should also limit at the edge.
-//
-// Counters live in the database (see db.bumpFailure), not in process
-// memory, so several instances behind a load balancer share one budget and
-// a redeploy does not reset it.
+// impractical. A deployment behind a CDN should also limit at the edge,
+// and this state is per-process so it resets on redeploy.
 const RATE_WINDOW_MS = 15 * 60_000;
 const RATE_MAX_FAILURES = Number(process.env.AUTH_RATE_LIMIT ?? 20);
+const failures = new Map();
 
-const clientKey = (req) => `ip:${req.ip ?? "unknown"}`;
+const clientKey = (req) => req.ip ?? "unknown";
 
-const lockedFor = async (key, max) => {
-  const entry = await db.getFailure(key);
+const rateLimitAuth = (req, res, next) => {
   const now = Date.now();
-  if (!entry || now - entry.start > RATE_WINDOW_MS || entry.count < max) return 0;
-  return Math.ceil((entry.start + RATE_WINDOW_MS - now) / 1000);
-};
+  const entry = failures.get(clientKey(req));
 
-const rateLimitAuth = async (req, res, next) => {
-  const retryAfter = await lockedFor(clientKey(req), RATE_MAX_FAILURES);
-  if (retryAfter > 0) {
+  if (entry && now - entry.start <= RATE_WINDOW_MS && entry.count >= RATE_MAX_FAILURES) {
+    const retryAfter = Math.ceil((entry.start + RATE_WINDOW_MS - now) / 1000);
     res.set("Retry-After", String(retryAfter));
     return res.status(429).json({ error: "Too many failed attempts. Please wait and try again." });
   }
   next();
 };
 
-// Expired rows are swept now and then so the table can't grow without bound.
-let lastSweep = 0;
-const sweepIfDue = async (now) => {
-  if (now - lastSweep < 60_000) return;
-  lastSweep = now;
-  await db.sweepFailures(now - RATE_WINDOW_MS);
-};
-
-const noteAuthFailure = async (req) => {
+const noteAuthFailure = (req) => {
   const now = Date.now();
-  await db.bumpFailure(clientKey(req), now, RATE_WINDOW_MS);
-  await sweepIfDue(now);
+  const key = clientKey(req);
+  const entry = failures.get(key);
+
+  if (!entry || now - entry.start > RATE_WINDOW_MS) {
+    failures.set(key, { start: now, count: 1 });
+  } else {
+    entry.count += 1;
+  }
+
+  // Opportunistic sweep so the map can't grow without bound.
+  if (failures.size > 5000) {
+    for (const [k, v] of failures) if (now - v.start > RATE_WINDOW_MS) failures.delete(k);
+  }
 };
 
 // A successful sign-in clears the counter for that address.
-const clearAuthFailures = (req) => db.clearFailure(clientKey(req));
-
-// Per-account limit: the per-IP cap alone is bypassed by spreading guesses
-// across many addresses. This caps failures against one email regardless of
-// source. It is higher than the IP cap so a shared NAT isn't locked out by
-// one person's typos, and under attack it can briefly lock out the real
-// owner — the usual trade for stopping distributed guessing.
-const ACCOUNT_MAX_FAILURES = Number(process.env.AUTH_ACCOUNT_RATE_LIMIT ?? 10);
-const accountKey = (email) => `acct:${String(email ?? "").trim().toLowerCase()}`;
-
-const accountLocked = async (email) => (await lockedFor(accountKey(email), ACCOUNT_MAX_FAILURES)) > 0;
-
-const noteAccountFailure = (email) => db.bumpFailure(accountKey(email), Date.now(), RATE_WINDOW_MS);
+const clearAuthFailures = (req) => failures.delete(clientKey(req));
 
 // ─── CACHING ────────────────────────────────────────────
 // Express adds an ETag to JSON responses, so a repeat GET whose body is
@@ -257,10 +233,6 @@ app.post("/api/login", rateLimitAuth, handler(async (req, res) => {
   if (role != null && !["driver", "owner", "admin"].includes(role)) {
     return res.status(400).json({ error: "Role must be driver, owner or admin." });
   }
-  if (await accountLocked(email)) {
-    res.set("Retry-After", String(Math.ceil(RATE_WINDOW_MS / 1000)));
-    return res.status(429).json({ error: "Too many failed attempts. Please wait and try again." });
-  }
 
   // An address may carry one account per role. The password normally picks
   // out which of them is being signed in to, so the form does not have to
@@ -273,12 +245,10 @@ app.post("/api/login", rateLimitAuth, handler(async (req, res) => {
   // Deliberately vague: saying "no such account" would let anyone
   // enumerate which emails are registered.
   if (matches.length === 0) {
-    await noteAuthFailure(req);
-    await noteAccountFailure(email);
+    noteAuthFailure(req);
     return res.status(401).json({ error: "Invalid email or password." });
   }
-  await clearAuthFailures(req);
-  await db.clearFailure(accountKey(email));
+  clearAuthFailures(req);
 
   // The same password opens more than one of this address's accounts. It
   // has already checked out, so naming the roles reveals nothing the
@@ -398,7 +368,7 @@ app.post("/api/password-reset/confirm", rateLimitAuth, handler(async (req, res) 
     return res.status(400).json({ error: "Password must be at least 6 characters." });
   }
   if (!(await db.consumePasswordReset(token, String(password)))) {
-    await noteAuthFailure(req);
+    noteAuthFailure(req);
     return res.status(400).json({ error: "This reset link is invalid or has expired. Request a new one." });
   }
   res.json({ ok: true, message: "Password updated. Sign in with your new password." });
@@ -435,7 +405,7 @@ app.get("/api/auth/providers", handler(async (_req, res) => {
   });
 }));
 
-app.get("/api/auth/:provider/start", handler(async (req, res) => {
+app.get("/api/auth/:provider/start", (req, res) => {
   const provider = oauth.PROVIDERS[req.params.provider];
   if (!provider) return res.status(404).json({ error: "Unknown provider." });
   if (!oauth.isConfigured(provider)) {
@@ -444,8 +414,8 @@ app.get("/api/auth/:provider/start", handler(async (req, res) => {
       hint: `Set ${provider.id.toUpperCase()}_CLIENT_ID and ${provider.id.toUpperCase()}_CLIENT_SECRET, and register ${oauth.redirectUriFor(provider)} as an authorized redirect URI.`,
     });
   }
-  res.redirect(await oauth.authorizeUrl(provider));
-}));
+  res.redirect(oauth.authorizeUrl(provider));
+});
 
 // Errors here are shown to a human in the browser, so they redirect back
 // to the app with a message rather than returning bare JSON.
@@ -474,7 +444,7 @@ const handleOAuthCallback = async (req, res) => {
   if (!code || !state) return oauthFail(res, "Sign-in response was incomplete.");
 
   // Single-use state: defeats CSRF and blocks callback replay.
-  const entry = await oauth.consumeState(String(state));
+  const entry = oauth.consumeState(String(state));
   if (!entry || entry.providerId !== provider.id) {
     return oauthFail(res, "Sign-in request expired or was not recognised. Please try again.");
   }
@@ -519,7 +489,7 @@ const handleOAuthCallback = async (req, res) => {
 
     // Hand the session over via a short-lived opaque code so the token
     // never appears in the URL, history or Referer header.
-    const handoff = await oauth.createHandoff({
+    const handoff = oauth.createHandoff({
       user: publicUser(user),
       token: tokenFor(user),
       provider: provider.id,
@@ -540,7 +510,7 @@ app.post("/api/auth/:provider/callback", handleOAuthCallback);
 app.post("/api/auth/exchange", handler(async (req, res) => {
   const { code } = req.body ?? {};
   if (!code) return res.status(400).json({ error: "Missing handoff code." });
-  const session = await oauth.consumeHandoff(String(code));
+  const session = oauth.consumeHandoff(String(code));
   if (!session) {
     return res.status(410).json({ error: "That sign-in link has already been used or expired." });
   }
@@ -592,7 +562,7 @@ app.post("/api/me/password", requireUser, handler(async (req, res) => {
   // By id, not by email: an address can carry more than one account and
   // only this one's password is being changed.
   if (!(await db.authenticateById(req.user.id, currentPassword))) {
-    await noteAuthFailure(req);
+    noteAuthFailure(req);
     return res.status(403).json({ error: "Current password is incorrect." });
   }
   (await db.changePassword(req.user.id, newPassword));
@@ -1048,7 +1018,7 @@ mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // Served read-only. The filenames are random, so one owner cannot guess
 // another's, but this is not a substitute for real per-file authorisation.
-app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "1y", immutable: true, index: false }));
+app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "1h", index: false }));
 
 // Magic-byte signatures: the declared MIME type comes from the client and
 // cannot be trusted, so the actual bytes decide what this file is.
@@ -1125,7 +1095,6 @@ app.delete("/api/spot-photos/:id", requireRole("owner", "admin"), handler(async 
 const NOMINATIM = "https://nominatim.openstreetmap.org/search";
 const geoCache = new Map(); // query -> { at, places }
 const GEO_TTL_MS = 10 * 60_000;
-const GEO_MAX_ENTRIES = 500;
 
 app.get("/api/places", async (req, res) => {
   const q = String(req.query.q ?? "").trim();
@@ -1157,14 +1126,6 @@ app.get("/api/places", async (req, res) => {
       lng: Number(r.lon),
     }));
 
-    // Bounded: entries only expire logically, so without a cap every
-    // distinct query would stay in memory until restart.
-    if (geoCache.size >= GEO_MAX_ENTRIES) {
-      const now = Date.now();
-      for (const [k, v] of geoCache) if (now - v.at >= GEO_TTL_MS) geoCache.delete(k);
-      // Map iterates in insertion order, so the first key is the oldest.
-      while (geoCache.size >= GEO_MAX_ENTRIES) geoCache.delete(geoCache.keys().next().value);
-    }
     geoCache.set(key, { at: Date.now(), places });
     res.json({ places });
   } catch (e) {
@@ -1239,21 +1200,7 @@ app.get("/api/stats", requireAdmin, handler(async (_req, res) => {
 }));
 
 // ─── MISC ───────────────────────────────────────────────
-// A balancer or orchestrator uses this to decide whether to send traffic
-// here, so it must prove the database answers (not just that the process is
-// up) and must start failing as soon as shutdown begins so the instance is
-// drained from rotation before it closes.
-let shuttingDown = false;
-app.get("/api/health", async (_req, res) => {
-  if (shuttingDown) return res.status(503).json({ ok: false, error: "Shutting down." });
-  try {
-    await db.ping();
-    res.json({ ok: true, db: db.DB_PATH });
-  } catch (e) {
-    console.error("[health] database check failed:", e.message);
-    res.status(503).json({ ok: false, error: "Database unavailable." });
-  }
-});
+app.get("/api/health", handler(async (_req, res) => res.json({ ok: true, db: db.DB_PATH })));
 
 // Test credentials for the seeded throwaway accounts.
 //
@@ -1287,10 +1234,6 @@ if (existsSync(join(DIST_DIR, "index.html"))) {
     immutable: true,
     maxAge: "1y",
   }));
-  // A file that no longer exists (an old tab asking for a chunk from a
-  // previous build) must be a real 404, not the HTML shell with a 200 —
-  // the browser would try to run HTML as JavaScript.
-  app.use("/assets", (_req, res) => res.status(404).type("text/plain").send("Not found"));
   // The service worker script must always be revalidated: a copy cached for
   // an hour would delay every release reaching installed clients.
   app.get("/sw.js", (_req, res) => {
@@ -1327,37 +1270,4 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: "Internal server error." });
 });
 
-const server = app.listen(PORT, () => console.log(`[api] http://localhost:${PORT}`));
-
-// Node closes idle keep-alive sockets after 5s, but proxies and load
-// balancers hold theirs open for about 60s. When a proxy reuses a socket
-// Node has just closed, the request fails with a 502. Keep ours open longer
-// than any proxy's idle timeout (headersTimeout must stay above it).
-server.keepAliveTimeout = 65_000;
-server.headersTimeout = 66_000;
-
-// ─── GRACEFUL SHUTDOWN ──────────────────────────────────
-// On SIGTERM (a deploy or scale-down) stop taking new connections, let
-// in-flight requests finish, then close the database. The health check
-// already reports 503, so a balancer stops routing here first.
-const SHUTDOWN_GRACE_MS = 10_000;
-const shutdown = (signal) => {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.log(`[api] ${signal} received, draining`);
-
-  const force = setTimeout(() => {
-    console.error("[api] drain timed out, exiting");
-    process.exit(1);
-  }, SHUTDOWN_GRACE_MS);
-  force.unref();
-
-  server.close(async () => {
-    try { await db.close(); } catch (e) { console.error("[db] close failed:", e.message); }
-    process.exit(0);
-  });
-  // Idle keep-alive sockets would otherwise hold close() open.
-  server.closeIdleConnections();
-};
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+app.listen(PORT, () => console.log(`[api] http://localhost:${PORT}`));

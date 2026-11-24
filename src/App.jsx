@@ -524,10 +524,17 @@ const ConfirmBookingSheet = ({ spot, hours, units, busy, error, onCancel, onConf
   const fee = Math.round(subtotal * 0.1);
   const total = Math.round(subtotal * 1.1);
 
-  // Online payment is switched off for now (to be revisited), so cash is the
-  // only method. The online flow in confirmBooking is left in place.
-  const availableMethods = ["cash"];
-  const [mode, setMode] = useState("cash");
+  // Parse available payment methods for this spot ("online" / "cash").
+  const availableMethods = (() => {
+    try {
+      const methods = spot.accepted_payment_methods ? JSON.parse(spot.accepted_payment_methods) : ["online", "cash"];
+      return Array.isArray(methods) ? methods : ["online", "cash"];
+    } catch {
+      return ["online", "cash"];
+    }
+  })();
+
+  const [mode, setMode] = useState(availableMethods[0] || "online");
 
   const row = (label, value, strong) => (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 0", fontSize: strong ? 15 : 13 }}>
@@ -2123,7 +2130,7 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
           paymentId: paid.paymentId,
           signature: paid.signature,
           amount: order.amount,
-          method: payment.method || "upi",
+          method: "upi",
         };
       }
       const { booking: made } = await api.createBooking(token, { spotId: spot.id, hours, payment: receipt });
@@ -2357,8 +2364,8 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
                 geoStatus={geoStatus}
                 scope={scope}
                 radiusM={prefs.radiusM}
-                onToggleScope={() => setScope(scope === "nearby" ? "all" : "nearby")}
                 picking={picking}
+                onToggleScope={() => setScope(scope === "nearby" ? "all" : "nearby")}
                 onRetryGps={requestLocation}
                 onStartPicking={() => setPicking(true)}
                 onCancelPicking={() => setPicking(false)}
@@ -2389,12 +2396,25 @@ const DriverHome = ({ user, token, onLogout, onSession }) => {
                 />
               ))}
               {!loadingSpots && !spotsErr && filtered.length === 0 && (
-                spots.length === 0 && scope === "nearby" && location ? (
-                  // Nothing in range of the search centre.
-                  <div data-testid={TID.spotsEmpty} style={{ textAlign: "center", padding: "28px 8px", color: COLORS.textSecondary, fontSize: 14, lineHeight: 1.6 }}>
+                spots.length === 0 && scope === "nearby" ? (
+                  // Nothing in range. The demo listings are Chennai-only, so
+                  // say that outright instead of leaving a dead end.
+                  <div data-testid={TID.spotsEmpty} style={{ textAlign: "center", padding: "28px 8px", color: COLORS.textSecondary, fontSize: 13, lineHeight: 1.6 }}>
                     <div style={{ fontSize: 30, marginBottom: 8 }}>🅿️</div>
-                    <div style={{ fontWeight: 600, color: COLORS.navy, fontSize: 15 }}>
-                      No spaces within {prefs.radiusM / 1000} km of you
+                    <div style={{ fontWeight: 600, color: COLORS.navy, fontSize: 15, marginBottom: 4 }}>
+                      No spots within {prefs.radiusM / 1000} km of you
+                    </div>
+                    <div style={{ marginBottom: 14 }}>
+                      All demo listings are in central Chennai, so there'll be
+                      nothing nearby if you're elsewhere.
+                    </div>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                      <Btn size="sm" onClick={() => setManualLocation(FALLBACK_CENTER)}>
+                        Jump to Chennai
+                      </Btn>
+                      <Btn size="sm" variant="outline" onClick={() => setScope("all")}>
+                        Show all spots
+                      </Btn>
                     </div>
                   </div>
                 ) : (

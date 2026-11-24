@@ -54,32 +54,9 @@ self.addEventListener("activate", (event) => {
   })());
 });
 
-// Keep the offline shell in step with the live one. The install step only
-// runs when this file's bytes change, which an ordinary deploy does not do,
-// so each successful page load refreshes the saved shell and its assets and
-// drops assets the new shell no longer references.
-const refreshShell = async (res) => {
-  const type = res.headers.get("content-type") ?? "";
-  if (!res.ok || !type.includes("text/html")) return;
-  const cache = await caches.open(SHELL_CACHE);
-  const html = await res.clone().text();
-  const wanted = new Set(html.match(/\/assets\/[^"'\s)]+/g) ?? []);
-  await cache.put(SHELL_URL, res);
-  await Promise.all([...wanted].map(async (url) => {
-    if (!(await cache.match(url))) await cache.add(url).catch(() => {});
-  }));
-  for (const req of await cache.keys()) {
-    const { pathname } = new URL(req.url);
-    if (pathname.startsWith("/assets/") && !wanted.has(pathname)) await cache.delete(req);
-  }
-};
-
 const navigation = async (request) => {
   try {
-    const res = await withTimeout(request);
-    // Only the app shell itself: a deep link returns the same HTML.
-    if (res.ok) void refreshShell(res.clone()).catch(() => {});
-    return res;
+    return await withTimeout(request);
   } catch {
     const cached = await caches.match(SHELL_URL);
     if (cached) return cached;
@@ -98,28 +75,17 @@ const asset = async (request) => {
   return res;
 };
 
-// The saved copy is keyed by a hash of the request's bearer token, so one
-// person's bookings can never be served to another session, even if the
-// app never got the chance to clear the cache. Only one entry is kept.
-const bookingsKey = async (request) => {
-  const auth = request.headers.get("Authorization") ?? "";
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(auth));
-  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-  return `${BOOKINGS_PATH}?session=${hex}`;
-};
-
 const bookings = async (request) => {
   const cache = await caches.open(API_CACHE);
-  const key = await bookingsKey(request);
+  // Keyed by URL only, so the response is partitioned by nothing else;
+  // that is safe only because the app clears the cache on every sign-in
+  // and sign-out.
   try {
     const res = await withTimeout(request);
-    if (res.ok) {
-      for (const old of await cache.keys()) await cache.delete(old);
-      await cache.put(key, res.clone());
-    }
+    if (res.ok) await cache.put(BOOKINGS_PATH, res.clone());
     return res;
   } catch {
-    const saved = await cache.match(key);
+    const saved = await cache.match(BOOKINGS_PATH);
     if (!saved) throw new Error("offline and no saved bookings");
     // Marked so the app can say the list may be out of date.
     const headers = new Headers(saved.headers);

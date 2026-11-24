@@ -469,12 +469,12 @@ const purgeOfflineData = (): void => {
 
 export const saveSession = (session: Session): void => {
   purgeOfflineData();
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
 };
 
 export const loadSession = (): Session | null => {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
+    const raw = localStorage.getItem(SESSION_KEY);
     return raw ? (JSON.parse(raw) as Session) : null;
   } catch {
     return null;
@@ -483,5 +483,5 @@ export const loadSession = (): Session | null => {
 
 export const clearSession = (): void => {
   purgeOfflineData();
-  sessionStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem(SESSION_KEY);
 };

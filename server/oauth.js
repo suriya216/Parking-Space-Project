@@ -14,7 +14,6 @@
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
-import * as db from "./db.js";
 import { appleClientSecret, appleConfig, isAppleConfigured } from "./apple.js";
 
 const env = (k, fallback = "") => (process.env[k] ?? "").trim() || fallback;
@@ -127,24 +126,30 @@ const makePkce = () => {
 
 // ─── TRANSIENT STATE ────────────────────────────────────
 // `state` defeats CSRF on the callback and carries the PKCE verifier.
-// Held in the database, not in memory: the redirect to the provider and the
-// callback back from it are separate requests that a load balancer may send
-// to different instances.
+// In-memory is fine for a single-process demo; a multi-instance
+// deployment would need a shared store (Redis, or a signed cookie).
 const STATE_TTL_MS = 10 * 60_000;
+const states = new Map();
 
-export const createState = async (providerId) => {
+const sweep = (map, ttl) => {
+  const now = Date.now();
+  for (const [k, v] of map) if (now - v.at > ttl) map.delete(k);
+};
+
+export const createState = (providerId) => {
+  sweep(states, STATE_TTL_MS);
   const state = base64url(randomBytes(24));
   const pkce = makePkce();
-  await db.sweepTransient(Date.now() - Math.max(STATE_TTL_MS, HANDOFF_TTL_MS));
-  await db.putTransient(state, "state", { providerId, verifier: pkce.verifier }, Date.now());
+  states.set(state, { at: Date.now(), providerId, verifier: pkce.verifier });
   return { state, challenge: pkce.challenge };
 };
 
-export const consumeState = async (state) => {
+export const consumeState = (state) => {
+  sweep(states, STATE_TTL_MS);
+  const entry = states.get(state);
   // Single use: a replayed callback must not authenticate again.
-  const hit = await db.takeTransient(state, "state");
-  if (!hit || Date.now() - hit.at > STATE_TTL_MS) return null;
-  return hit.payload;
+  if (entry) states.delete(state);
+  return entry ?? null;
 };
 
 // ─── ONE-TIME HANDOFF CODES ─────────────────────────────
@@ -153,22 +158,25 @@ export const consumeState = async (state) => {
 // session token out of the URL (and so out of history, logs and the
 // Referer header).
 const HANDOFF_TTL_MS = 60_000;
+const handoffs = new Map();
 
-export const createHandoff = async (payload) => {
+export const createHandoff = (payload) => {
+  sweep(handoffs, HANDOFF_TTL_MS);
   const code = randomUUID();
-  await db.putTransient(code, "handoff", payload, Date.now());
+  handoffs.set(code, { at: Date.now(), payload });
   return code;
 };
 
-export const consumeHandoff = async (code) => {
-  const hit = await db.takeTransient(code, "handoff");
-  if (!hit || Date.now() - hit.at > HANDOFF_TTL_MS) return null;
-  return hit.payload;
+export const consumeHandoff = (code) => {
+  sweep(handoffs, HANDOFF_TTL_MS);
+  const entry = handoffs.get(code);
+  if (entry) handoffs.delete(code);
+  return entry?.payload ?? null;
 };
 
 // ─── AUTHORIZATION URL ──────────────────────────────────
-export const authorizeUrl = async (provider) => {
-  const { state, challenge } = await createState(provider.id);
+export const authorizeUrl = (provider) => {
+  const { state, challenge } = createState(provider.id);
   const params = new URLSearchParams({
     client_id: provider.clientId,
     redirect_uri: redirectUriFor(provider),

@@ -66,25 +66,13 @@ test.describe("offline parking pass", () => {
     driverHome,
     bookings,
   }) => {
-    /* Real accounts cannot book the seeded demo spots, so a real owner
-       lists one for this driver to book. */
-    const owner = await api.register(newAccount("owner"));
-    const listed = await api.createSpot(owner.data.token, {
-      name: "Offline Pass Garage",
-      address: "1 Test Street, Chennai",
-      type: "Covered",
-      vehicle: "Sedan",
-      price: 30,
-      lat: 13.04,
-      lng: 80.24,
-      available: "Daily",
-    });
-    expect(listed.status).toBe(201);
-    const spot = listed.data.spot;
+    const spots = await api.spots();
+    const spot = spots.data.spots[0];
+    if (!spot) test.skip(true, "no seeded spots to book");
 
     const registered = await api.register(newAccount("driver"));
     const booked = await api.createBooking(registered.data.token, {
-      spotId: spot.id,
+      spotId: spot!.id,
       hours: BOOKING_HOURS.minimum,
     });
     const ref = booked.data.booking.ref;

@@ -115,14 +115,8 @@ npm run prod:local        # http://localhost:3002
   on the temporary disk and reset on restart.
 - **Sleeps when idle.** After ~15 minutes without traffic the service
   spins down; the next request takes 30–60 seconds.
-- **Running several instances.** Sessions, rate-limit counters, OAuth state
-  and sign-in handoff codes are all in the database, so any number of
-  instances can sit behind a load balancer **if they share one `DATABASE_URL`
-  and one `SESSION_SECRET`**. The default local PGlite database cannot be
-  shared. Uploaded photos are still on local disk, so with more than one
-  instance use a shared volume (or keep to one instance) until photos move to
-  object storage. Point the balancer's health check at `/api/health`: it
-  queries the database and returns 503 while shutting down.
+- **Single instance is still advised.** Rate limiting and sign-in handoff
+  state are held in memory per process.
 
 ## Known limitations of the app
 
@@ -135,11 +129,5 @@ real people's data.
   lower with `SESSION_TTL_DAYS`).
 - **Uploaded photos are not access-controlled.** Anyone with the URL can
   view one.
-- **Rate limiting** is stored in the database, so it survives redeploys and is shared across instances.
-  Failed logins are capped per IP (`AUTH_RATE_LIMIT`, default 20) and per
-  email (`AUTH_ACCOUNT_RATE_LIMIT`, default 10) per 15 minutes. The IP comes
-  from `X-Forwarded-For` only as far as `TRUST_PROXY` allows (default: 1 proxy
-  hop in production); set it to your real hop count. Check it after deploying:
-  if every user appears to share one IP, there are more proxies in front than
-  `TRUST_PROXY` says and one person's failed logins will lock everyone out.
+- **Rate limiting is per-process and in-memory**, so it resets on deploy.
 - **Spot ratings and the owner earnings chart are illustrative.**
