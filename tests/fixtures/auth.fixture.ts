@@ -32,7 +32,7 @@ export const injectSession = async (page: Page, session: Session): Promise<void>
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.evaluate(
     ([key, value]) => {
-      window.localStorage.setItem(key as string, value as string);
+      window.sessionStorage.setItem(key as string, value as string);
     },
     [SESSION_STORAGE_KEY, JSON.stringify(session)],
   );
@@ -58,6 +58,6 @@ export const signInAs = async (
 /** Leave the app signed out, clearing anything a previous test left. */
 export const signOutCompletely = async (page: Page): Promise<void> => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.evaluate(() => window.localStorage.clear());
+  await page.evaluate(() => { window.localStorage.clear(); window.sessionStorage.clear(); });
   await page.reload({ waitUntil: "domcontentloaded" });
 };

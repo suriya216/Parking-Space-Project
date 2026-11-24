@@ -30,6 +30,7 @@ export interface ProdEnvironment {
       method?: string;
       body?: unknown;
       token?: string;
+      headers?: Record<string, string>;
       redirect?: RequestRedirect;
     },
   ) => Promise<Response>;
@@ -77,6 +78,7 @@ export const startProdServer = async (
       headers: {
         ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
         ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
+        ...opts.headers,
       },
       ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
     });
